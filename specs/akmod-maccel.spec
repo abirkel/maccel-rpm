@@ -116,5 +116,4 @@ fi
 %config(noreplace) %{_sysconfdir}/akmods/maccel.conf
 
 %changelog
-# Changelog entries will be generated during build
-# See https://github.com/Gnarus-G/maccel/releases for upstream changes
+# Changelog will be generated from upstream releases

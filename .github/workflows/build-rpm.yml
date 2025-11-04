@@ -59,6 +59,36 @@ jobs:
         run: |
           cp specs/*.spec ~/rpmbuild/SPECS/
 
+      - name: Generate changelog from releases
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          
+          # Fetch release notes from GitHub API
+          RELEASE_NOTES=$(curl -s "https://api.github.com/repos/Gnarus-G/maccel/releases/tags/${VERSION}" | \
+            jq -r '.body // "- Release ${VERSION}"')
+          
+          # Get release date
+          RELEASE_DATE=$(curl -s "https://api.github.com/repos/Gnarus-G/maccel/releases/tags/${VERSION}" | \
+            jq -r '.published_at // now | strftime("%a %b %d %Y")')
+          
+          # Format date for RPM changelog (e.g., "Mon Nov 04 2025")
+          CHANGELOG_DATE=$(date -d "${RELEASE_DATE}" "+%a %b %d %Y" 2>/dev/null || date "+%a %b %d %Y")
+          
+          # Generate changelog entry
+          CHANGELOG_ENTRY="* ${CHANGELOG_DATE} Maccel RPM Builder <maccel-rpm-signing@noreply.github.com> - ${VERSION#v}-1"
+          
+          # Format release notes as changelog items (prefix each line with -)
+          FORMATTED_NOTES=$(echo "${RELEASE_NOTES}" | sed 's/^/- /' | head -20)
+          
+          # Append to spec files
+          for spec in ~/rpmbuild/SPECS/maccel.spec ~/rpmbuild/SPECS/akmod-maccel.spec; do
+            # Remove the placeholder changelog line
+            sed -i '/# Changelog will be generated from upstream releases/d' "$spec"
+            # Add the generated changelog
+            echo "${CHANGELOG_ENTRY}" >> "$spec"
+            echo "${FORMATTED_NOTES}" >> "$spec"
+          done
+
       - name: Build akmod-maccel
         run: |
           cd ~/rpmbuild/SPECS
@@ -90,10 +120,10 @@ jobs:
       - name: Sign RPM packages
         run: |
           echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
+          echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
+          echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes --pinentry-mode loopback --passphrase '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
           cd ~/rpmbuild/RPMS/x86_64
           rpm --addsign *.rpm
-        env:
-          GPG_TTY: /dev/console
 
       - name: Create repository metadata
         run: |

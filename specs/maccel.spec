@@ -107,6 +107,5 @@ fi
 /usr/lib/udev/maccel_param_ownership_and_resets
 
 %changelog
-# Changelog entries will be generated during build
-# See https://github.com/Gnarus-G/maccel/releases for upstream changes
+# Changelog will be generated from upstream releases
 
