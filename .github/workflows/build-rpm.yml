@@ -1,0 +1,157 @@
+---
+name: Build and Publish RPM Packages
+
+'on':
+  push:
+    paths:
+      - '.external_release_tag'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if version unchanged'
+        required: false
+        type: boolean
+        default: false
+      build_kmod:
+        description: 'Build kmod package (in addition to akmod)'
+        required: false
+        type: boolean
+        default: false
+      fedora_version:
+        description: 'Fedora version to use (e.g., latest, 40, 41)'
+        required: false
+        type: string
+        default: 'latest'
+
+jobs:
+  build-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:${{ github.event.inputs.fedora_version || 'latest' }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read maccel version
+        id: version
+        run: |
+          VERSION=$(cat .external_release_tag)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y rpm-build rpmdevtools rpmlint akmods \
+                         kmodtool kernel-devel gcc make rust cargo \
+                         git wget createrepo_c rpm-sign gnupg2 pinentry
+
+      - name: Setup RPM build tree
+        run: rpmdev-setuptree
+
+      - name: Download maccel source
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          wget https://github.com/Gnarus-G/maccel/archive/${VERSION}.tar.gz \
+               -O ~/rpmbuild/SOURCES/maccel-${VERSION#v}.tar.gz
+
+      - name: Copy spec files
+        run: |
+          cp specs/*.spec ~/rpmbuild/SPECS/
+
+      - name: Build akmod-maccel
+        run: |
+          cd ~/rpmbuild/SPECS
+          rpmbuild -ba akmod-maccel.spec
+
+      - name: Build maccel CLI
+        run: |
+          cd ~/rpmbuild/SPECS
+          rpmbuild -ba maccel.spec
+
+      - name: Lint packages
+        run: |
+          rpmlint ~/rpmbuild/RPMS/x86_64/*.rpm || true
+        continue-on-error: true
+
+      - name: Setup GPG for signing
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY_ENC }}" | base64 -d \
+            > private.key.enc
+          openssl enc -aes-256-cbc -d -in private.key.enc \
+            -out private.key \
+            -pass pass:"${{ secrets.GPG_PASSPHRASE }}"
+          gpg --batch --import private.key
+          echo -e "5\ny\n" | gpg --batch --command-fd 0 \
+            --edit-key "${{ secrets.GPG_KEY_ID }}" trust
+          rm private.key private.key.enc
+
+      - name: Sign RPM packages
+        run: |
+          echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
+          cd ~/rpmbuild/RPMS/x86_64
+          rpm --addsign *.rpm
+        env:
+          GPG_TTY: /dev/console
+
+      - name: Create repository metadata
+        run: |
+          mkdir -p repo
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm repo/
+          cp ~/rpmbuild/SRPMS/*.src.rpm repo/
+          createrepo_c repo/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-packages
+          path: repo/
+
+  publish:
+    needs: build-rpm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm-packages
+          path: repo/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ needs.build-rpm.outputs.version }}
+          files: repo/**/*
+          body: |
+            RPM packages for maccel
+            ${{ needs.build-rpm.outputs.version }}
+
+            ## Installation
+
+            ```bash
+            # Download and install the .repo file
+            REPO_URL="https://raw.githubusercontent.com"
+            sudo wget \
+              ${REPO_URL}/${{ github.repository }}/main/maccel.repo \
+              -O /etc/yum.repos.d/maccel.repo
+
+            # Install maccel
+            sudo dnf install maccel
+            ```
+
+            ## Packages
+
+            - akmod-maccel: Automatic kernel module package
+            - maccel: CLI tool for configuring mouse acceleration
+
+            ## Post-installation
+
+            ```bash
+            # Add your user to the maccel group
+            sudo usermod -aG maccel $USER
+
+            # Log out and back in for group changes to take effect
+            ```
