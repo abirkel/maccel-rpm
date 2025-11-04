@@ -63,11 +63,15 @@ jobs:
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba akmod-maccel.spec
+        env:
+          MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Build maccel CLI
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba maccel.spec
+        env:
+          MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Lint packages
         run: |
