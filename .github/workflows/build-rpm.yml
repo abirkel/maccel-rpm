@@ -76,15 +76,12 @@ jobs:
 
       - name: Setup GPG for signing
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY_ENC }}" | base64 -d \
-            > private.key.enc
-          openssl enc -aes-256-cbc -d -in private.key.enc \
-            -out private.key \
-            -pass pass:"${{ secrets.GPG_PASSPHRASE }}"
-          gpg --batch --import private.key
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d > private.key
+          gpg --batch --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            --import private.key
           echo -e "5\ny\n" | gpg --batch --command-fd 0 \
             --edit-key "${{ secrets.GPG_KEY_ID }}" trust
-          rm private.key private.key.enc
+          rm private.key
 
       - name: Sign RPM packages
         run: |
