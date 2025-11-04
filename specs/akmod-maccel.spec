@@ -56,19 +56,19 @@ cat > _kmod_build_/maccel/Makefile << 'EOF'
 obj-m := maccel.o
 
 # Set FIXEDPT_BITS=64 for x86_64 architecture
-ifeq ($(shell uname -m),x86_64)
-    ccflags-y := -DFIXEDPT_BITS=64
+ifeq ($$(shell uname -m),x86_64)
+ccflags-y := -DFIXEDPT_BITS=64
 endif
 
 # Standard kernel module build
 all:
-    $(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules
+	$$(MAKE) -C $$(KERNEL_SRC) M=$$(PWD) modules
 
 clean:
-    $(MAKE) -C $(KERNEL_SRC) M=$(PWD) clean
+	$$(MAKE) -C $$(KERNEL_SRC) M=$$(PWD) clean
 
 install:
-    $(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules_install
+	$$(MAKE) -C $$(KERNEL_SRC) M=$$(PWD) modules_install
 
 .PHONY: all clean install
 EOF
