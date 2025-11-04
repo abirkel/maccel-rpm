@@ -1,9 +1,10 @@
+---
 name: Check Maccel Release
 
 on:
   schedule:
     - cron: '0 0 * * *'  # Runs daily at midnight UTC
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch: true  # Allow manual trigger
 
 jobs:
   check_release:
@@ -11,13 +12,50 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
-      - name: Detect new release
-        uses: dawidd6/action-detect-release@v1
-        with:
-          repository: Gnarus-G/maccel
-          save_to_file: .external_release_tag
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          
-      # If new release detected, the action commits the updated tag
-      # This commit triggers the build workflow
+
+      - name: Get latest maccel release
+        id: get_release
+        run: |
+          LATEST_TAG=$(gh api \
+            repos/Gnarus-G/maccel/releases/latest --jq '.tag_name')
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest maccel release: $LATEST_TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if release is new
+        id: check_new
+        run: |
+          LATEST_TAG="${{ steps.get_release.outputs.latest_tag }}"
+
+          if [ -f .external_release_tag ]; then
+            CURRENT_TAG=$(cat .external_release_tag)
+            echo "Current tracked tag: $CURRENT_TAG"
+          else
+            CURRENT_TAG=""
+            echo "No existing tag file found"
+          fi
+
+          if [ "$LATEST_TAG" != "$CURRENT_TAG" ]; then
+            echo "is_new=true" >> "$GITHUB_OUTPUT"
+            echo "New release detected: $LATEST_TAG"
+          else
+            echo "is_new=false" >> "$GITHUB_OUTPUT"
+            echo "No new release (current: $CURRENT_TAG)"
+          fi
+
+      - name: Update release tag file
+        if: steps.check_new.outputs.is_new == 'true'
+        run: |
+          LATEST="${{ steps.get_release.outputs.latest_tag }}"
+          echo "$LATEST" > .external_release_tag
+
+      - name: Commit and push changes
+        if: steps.check_new.outputs.is_new == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .external_release_tag
+          LATEST="${{ steps.get_release.outputs.latest_tag }}"
+          git commit -m "chore: update maccel release to $LATEST" && \
+            git push
