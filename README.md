@@ -8,30 +8,12 @@ This repository provides automated RPM packaging for maccel, a mouse acceleratio
 
 ## Packages
 
-This repository builds three RPM packages:
-
 - **akmod-maccel**: Automatic kernel module package that rebuilds for new kernels using akmods
-- **kmod-maccel**: Kernel module package for specific kernel versions (optional, not built by default)
 - **maccel**: CLI tool for configuring mouse acceleration parameters
-
-## Repository Structure
-
-```
-maccel-rpm/
-├── .github/
-│   └── workflows/      # GitHub Actions workflows
-├── .gitignore
-├── specs/              # RPM spec files
-└── README.md
-```
 
 ## Installation
 
-### Prerequisites
-
-- Fedora or compatible RPM-based distribution
-- x86_64 architecture
-- Internet connection for downloading packages
+**Prerequisites**: Fedora or compatible RPM-based distribution (x86_64)
 
 ### Repository Setup
 
@@ -45,15 +27,6 @@ sudo curl -L https://raw.githubusercontent.com/abirkel/maccel-rpm/main/maccel.re
 
 The GPG public key will be automatically imported when you first install a package from this repository.
 
-**Manual GPG Key Import (Optional)**:
-
-If you prefer to import the GPG key manually before installing packages:
-
-```bash
-# Import the GPG public key
-sudo rpm --import https://raw.githubusercontent.com/abirkel/maccel-rpm/main/RPM-GPG-KEY-maccel
-```
-
 ### Package Installation
 
 Install maccel and its dependencies:
@@ -64,14 +37,6 @@ sudo dnf install maccel
 ```
 
 The `maccel` package will automatically pull in `akmod-maccel`, which provides the kernel module. The akmod system will build the kernel module for your current kernel during installation.
-
-**Installing Only the Kernel Module**:
-
-If you only need the kernel module without the CLI tool:
-
-```bash
-sudo dnf install akmod-maccel
-```
 
 ### Post-Installation
 
@@ -181,7 +146,7 @@ sudo dnf repolist | grep maccel
 sudo dnf clean all
 sudo dnf makecache
 
-# Manually import GPG key if needed
+# If GPG verification fails, manually import the key
 sudo rpm --import https://raw.githubusercontent.com/abirkel/maccel-rpm/main/RPM-GPG-KEY-maccel
 ```
 
