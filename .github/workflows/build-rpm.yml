@@ -23,6 +23,10 @@ name: Build and Publish RPM Packages
         type: string
         default: 'latest'
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build-rpm:
     runs-on: ubuntu-latest
