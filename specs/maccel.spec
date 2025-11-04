@@ -47,10 +47,10 @@ cargo build --release
 install -D -m 0755 target/release/maccel %{buildroot}%{_bindir}/maccel
 
 # Install udev rules to %{_udevrulesdir}
-install -D -m 0644 udev/99-maccel.rules %{buildroot}%{_udevrulesdir}/99-maccel.rules
+install -D -m 0644 udev_rules/99-maccel.rules %{buildroot}%{_udevrulesdir}/99-maccel.rules
 
 # Install udev helper script to /usr/lib/udev/
-install -D -m 0755 udev/maccel_param_ownership_and_resets %{buildroot}/usr/lib/udev/maccel_param_ownership_and_resets
+install -D -m 0755 udev_rules/maccel_param_ownership_and_resets %{buildroot}/usr/lib/udev/maccel_param_ownership_and_resets
 
 %pre
 # Create maccel system group
