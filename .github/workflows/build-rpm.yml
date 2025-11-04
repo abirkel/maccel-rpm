@@ -63,22 +63,25 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.version }}
           
-          # Fetch release notes from GitHub API
-          RELEASE_NOTES=$(curl -s "https://api.github.com/repos/Gnarus-G/maccel/releases/tags/${VERSION}" | \
-            jq -r '.body // "- Release ${VERSION}"')
+          # Fetch release info from GitHub API
+          RELEASE_JSON=$(curl -s "https://api.github.com/repos/Gnarus-G/maccel/releases/tags/${VERSION}")
           
-          # Get release date
-          RELEASE_DATE=$(curl -s "https://api.github.com/repos/Gnarus-G/maccel/releases/tags/${VERSION}" | \
-            jq -r '.published_at // now | strftime("%a %b %d %Y")')
+          # Extract release notes using grep/sed (no jq needed)
+          RELEASE_NOTES=$(echo "$RELEASE_JSON" | grep -o '"body":"[^"]*"' | sed 's/"body":"//;s/"$//' | sed 's/\\n/\n/g' | head -20)
           
-          # Format date for RPM changelog (e.g., "Mon Nov 04 2025")
-          CHANGELOG_DATE=$(date -d "${RELEASE_DATE}" "+%a %b %d %Y" 2>/dev/null || date "+%a %b %d %Y")
+          # Get current date for changelog
+          CHANGELOG_DATE=$(date "+%a %b %d %Y")
           
           # Generate changelog entry
           CHANGELOG_ENTRY="* ${CHANGELOG_DATE} Maccel RPM Builder <maccel-rpm-signing@noreply.github.com> - ${VERSION#v}-1"
           
-          # Format release notes as changelog items (prefix each line with -)
-          FORMATTED_NOTES=$(echo "${RELEASE_NOTES}" | sed 's/^/- /' | head -20)
+          # Format release notes as changelog items (prefix non-empty lines with -)
+          FORMATTED_NOTES=$(echo "${RELEASE_NOTES}" | sed '/^$/d' | sed 's/^/- /' | head -20)
+          
+          # If no release notes found, add a default entry
+          if [ -z "$FORMATTED_NOTES" ]; then
+            FORMATTED_NOTES="- Release ${VERSION}"
+          fi
           
           # Append to spec files
           for spec in ~/rpmbuild/SPECS/maccel.spec ~/rpmbuild/SPECS/akmod-maccel.spec; do
