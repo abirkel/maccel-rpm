@@ -132,18 +132,31 @@ jobs:
           cd ~/rpmbuild/RPMS/x86_64
           rpm --addsign *.rpm
 
+      - name: Prepare release packages
+        run: |
+          mkdir -p release-packages
+          # Copy only the main packages (exclude kmodtool-generated stubs)
+          cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm release-packages/
+          cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/
+          # Exclude akmod-akmod-maccel and kmod-akmod-maccel (kmodtool stubs)
+          rm -f release-packages/akmod-akmod-maccel-*.rpm
+          rm -f release-packages/kmod-akmod-maccel-*.rpm
+          # Copy source RPMs
+          cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/
+          
       - name: Create repository metadata
         run: |
           mkdir -p repo
-          cp ~/rpmbuild/RPMS/x86_64/*.rpm repo/
-          cp ~/rpmbuild/SRPMS/*.src.rpm repo/
+          cp release-packages/*.rpm repo/
           createrepo_c repo/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: rpm-packages
-          path: repo/
+          path: |
+            release-packages/
+            repo/
 
   publish:
     needs: build-rpm
@@ -156,13 +169,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rpm-packages
-          path: repo/
+          path: artifacts/
 
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: build-${{ needs.build-rpm.outputs.version }}
-          files: repo/**/*
+          files: artifacts/release-packages/*
           body: |
             RPM packages for maccel
             ${{ needs.build-rpm.outputs.version }}
