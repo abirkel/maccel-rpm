@@ -29,12 +29,6 @@ configuring the kernel module parameters.
 The kernel module must be installed separately via akmod-maccel or kmod-maccel.
 
 %prep
-# Error out if the version is not set
-if [ "%{version}" = "0.0.0" ]; then
-    echo "ERROR: MACCEL_VERSION environment variable not set"
-    exit 1
-fi
-
 %setup -q -n maccel-%{version}
 
 %build
@@ -46,6 +40,9 @@ export RUSTUP_TOOLCHAIN=stable
 
 # Build the release binary
 cargo build --release
+
+# Return to parent directory
+cd ..
 
 %install
 # Install maccel binary to %{_bindir}

@@ -55,12 +55,6 @@ is to use the akmod-maccel package, which automatically rebuilds the kernel modu
 when the kernel is updated.
 
 %prep
-# Error out if the version is not set
-if [ "%{version}" = "0.0.0" ]; then
-    echo "ERROR: MACCEL_VERSION environment variable not set"
-    exit 1
-fi
-
 %setup -q -n maccel-%{version}
 
 %build
