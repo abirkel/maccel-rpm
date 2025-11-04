@@ -72,6 +72,7 @@ make -C %{?kernel_source}%{!?kernel_source:/usr/src/kernels/%{kversion}} M=$(pwd
 
 %install
 # Install the compiled kernel module
+# Note: Each RPM section starts fresh in the BUILD directory
 mkdir -p %{buildroot}%{?kernel_module_package_moddir}%{!?kernel_module_package_moddir:/lib/modules/%{kversion}/extra}/maccel/
 install -m 644 driver/maccel.ko %{buildroot}%{?kernel_module_package_moddir}%{!?kernel_module_package_moddir:/lib/modules/%{kversion}/extra}/maccel/
 
