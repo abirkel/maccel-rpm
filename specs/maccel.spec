@@ -41,12 +41,10 @@ export RUSTUP_TOOLCHAIN=stable
 # Build the release binary
 cargo build --release
 
-# Return to parent directory
-cd ..
-
 %install
 # Install maccel binary to %{_bindir}
-install -D -m 0755 cli/target/release/maccel %{buildroot}%{_bindir}/maccel
+# Note: cargo workspace builds put binaries in workspace root target/ directory
+install -D -m 0755 target/release/maccel %{buildroot}%{_bindir}/maccel
 
 # Install udev rules to %{_udevrulesdir}
 install -D -m 0644 udev/99-maccel.rules %{buildroot}%{_udevrulesdir}/99-maccel.rules
