@@ -1,0 +1,23 @@
+name: Check Maccel Release
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at midnight UTC
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  check_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Detect new release
+        uses: dawidd6/action-detect-release@v1
+        with:
+          repository: Gnarus-G/maccel
+          save_to_file: .external_release_tag
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          
+      # If new release detected, the action commits the updated tag
+      # This commit triggers the build workflow
