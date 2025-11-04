@@ -33,12 +33,6 @@ Maccel is a mouse acceleration driver for Linux that provides customizable mouse
 acceleration curves and parameters through a kernel module and CLI tool.
 
 %prep
-# Error out if the version is not set
-if [ "%{version}" = "0.0.0" ]; then
-    echo "ERROR: MACCEL_VERSION environment variable not set"
-    exit 1
-fi
-
 %setup -q -n maccel-%{version}
 
 # Copy the driver source to the build directory
