@@ -10,7 +10,7 @@ BUILD/
 BUILDROOT/
 RPMS/
 SOURCES/
-SPECS/
+#SPECS/
 SRPMS/
 
 # Temporary files
