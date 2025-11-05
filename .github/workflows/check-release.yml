@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,3 +62,10 @@ jobs:
           LATEST="${{ steps.get_release.outputs.latest_tag }}"
           git commit -m "chore: update maccel release to $LATEST" && \
             git push
+
+      - name: Trigger RPM build workflow
+        if: steps.check_new.outputs.is_new == 'true'
+        run: |
+          gh workflow run build-rpm.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
