@@ -1,5 +1,9 @@
 # Maccel RPM Packaging
 
+[![Latest Release](https://img.shields.io/github/v/release/abirkel/maccel-rpm?label=Latest%20Release&color=blue)](https://github.com/abirkel/maccel-rpm/releases/latest)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/abirkel/maccel-rpm/build-rpm.yml?branch=main&label=Build)](https://github.com/abirkel/maccel-rpm/actions/workflows/build-rpm.yml)
+[![Platform](https://img.shields.io/badge/Platform-Fedora%20%7C%20RPM-294172?logo=fedora)](https://github.com/abirkel/maccel-rpm)
+
 RPM packages for the [maccel](https://github.com/Gnarus-G/maccel) mouse acceleration driver for Fedora and RPM-based Linux distributions.
 
 ## Overview
