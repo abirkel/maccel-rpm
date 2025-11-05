@@ -103,51 +103,7 @@ For additional help, see the [upstream maccel issues](https://github.com/Gnarus-
 
 ## Building Locally
 
-If you want to build the RPM packages locally instead of using the pre-built packages:
-
-### Prerequisites
-
-```bash
-# Install build dependencies
-sudo dnf install rpm-build rpmdevtools rpmlint akmods kmodtool \
-                 kernel-devel gcc make rust cargo git wget
-```
-
-### Build Process
-
-```bash
-# Clone this repository
-git clone https://github.com/abirkel/maccel-rpm.git
-cd maccel-rpm
-
-# Set up RPM build tree
-rpmdev-setuptree
-
-# Download the maccel source (replace VERSION with desired version)
-VERSION=v0.5.6
-wget https://github.com/Gnarus-G/maccel/archive/${VERSION}.tar.gz \
-     -O ~/rpmbuild/SOURCES/maccel-${VERSION#v}.tar.gz
-
-# Copy spec files
-cp specs/*.spec ~/rpmbuild/SPECS/
-
-# Build the packages
-cd ~/rpmbuild/SPECS
-rpmbuild -ba akmod-maccel.spec
-rpmbuild -ba maccel.spec
-
-# Find built packages
-ls -l ~/rpmbuild/RPMS/x86_64/
-ls -l ~/rpmbuild/SRPMS/
-```
-
-### Installing Local Builds
-
-```bash
-# Install the locally built packages
-sudo dnf install ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm
-sudo dnf install ~/rpmbuild/RPMS/x86_64/maccel-*.rpm
-```
+Want to build the packages yourself or modify them? See the [Building Guide](BUILDING.md) for detailed instructions on local development.
 
 ## Contributing
 
