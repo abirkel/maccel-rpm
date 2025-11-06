@@ -171,14 +171,11 @@ jobs:
           name: rpm-packages
           path: artifacts/
 
-      - name: Create release
+      - name: Create release with packages
         uses: softprops/action-gh-release@v1
         with:
           tag_name: build-${{ needs.build-rpm.outputs.version }}
-          files: |
-            artifacts/release-packages/*
-            artifacts/repo/*.rpm
-            artifacts/repo/repodata/*
+          files: artifacts/release-packages/*
           body: |
             RPM packages for maccel
             ${{ needs.build-rpm.outputs.version }}
@@ -209,3 +206,11 @@ jobs:
 
             # Log out and back in for group changes to take effect
             ```
+
+      - name: Deploy repo to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: artifacts/repo
+          destination_dir: repo
+          keep_files: false
