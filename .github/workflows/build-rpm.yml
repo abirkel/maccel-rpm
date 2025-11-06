@@ -175,7 +175,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: build-${{ needs.build-rpm.outputs.version }}
-          files: artifacts/release-packages/*
+          files: artifacts/repo/**/*
           body: |
             RPM packages for maccel
             ${{ needs.build-rpm.outputs.version }}
