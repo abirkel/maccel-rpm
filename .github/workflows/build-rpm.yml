@@ -65,9 +65,11 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          dnf install -y rpm-build rpmdevtools rpmlint akmods \
-                         kmodtool kernel-devel gcc make rust cargo \
-                         git wget createrepo_c rpm-sign gnupg2 pinentry
+          # Step 1: Install base RPM build tools
+          dnf install -y rpm-build rpmdevtools rpmlint createrepo_c rpm-sign gnupg2 pinentry
+          
+          # Step 2: Install BuildRequires from spec files
+          dnf builddep -y specs/*.spec
 
       - name: Setup RPM build tree
         run: rpmdev-setuptree
