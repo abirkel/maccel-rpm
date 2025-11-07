@@ -45,6 +45,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Update spec files with new version
+        if: github.event_name == 'push'
         run: |
           VERSION=${{ steps.version.outputs.version }}
           VERSION_NUM=${VERSION#v}
