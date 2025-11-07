@@ -193,9 +193,21 @@ jobs:
             # Log out and back in for group changes to take effect
             ```
 
+      - name: Prepare merged repository
+        run: |
+          # Install createrepo_c for metadata generation
+          dnf install -y createrepo_c
+          
+          # Prepare repo directory with new packages
+          mkdir -p repo
+          cp artifacts/repo/*.rpm repo/ 2>/dev/null || true
+          
+          # Regenerate repository metadata to include all packages
+          createrepo_c repo/
+
       - name: Deploy repo to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: artifacts/repo
+          publish_dir: repo
           keep_files: true
