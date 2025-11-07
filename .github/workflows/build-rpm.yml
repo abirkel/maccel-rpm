@@ -12,11 +12,26 @@ name: Build and Publish RPM Packages
         required: false
         type: boolean
         default: false
+      build_akmod:
+        description: 'Build akmod package'
+        required: false
+        type: boolean
+        default: true
+      build_cli:
+        description: 'Build CLI package'
+        required: false
+        type: boolean
+        default: true
       build_kmod:
-        description: 'Build kmod package (in addition to akmod)'
+        description: 'Build kmod package'
         required: false
         type: boolean
         default: false
+      container_image:
+        description: 'Container image to use (e.g., fedora, ghcr.io/ublue-os/aurora-nvidia-open)'
+        required: false
+        type: string
+        default: 'fedora'
       fedora_version:
         description: 'Fedora version to use (e.g., latest, 40, 41)'
         required: false
@@ -31,9 +46,12 @@ jobs:
   build-rpm:
     runs-on: ubuntu-latest
     container:
-      image: fedora:${{ github.event.inputs.fedora_version || 'latest' }}
+      image: ${{ github.event.inputs.container_image }}:${{ github.event.inputs.fedora_version }}
     outputs:
       version: ${{ steps.version.outputs.version }}
+      container_image: ${{ steps.build_info.outputs.container_image }}
+      container_digest: ${{ steps.build_info.outputs.container_digest }}
+      kernel_version: ${{ steps.build_info.outputs.kernel_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,6 +61,37 @@ jobs:
         run: |
           VERSION=$(cat .external_release_tag)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Load container config
+        id: config
+        run: |
+          source .github/workflows/config.env
+          echo "container_image=$CONTAINER_IMAGE" >> $GITHUB_ENV
+          echo "container_version=$CONTAINER_VERSION" >> $GITHUB_ENV
+
+      - name: Capture build info
+        id: build_info
+        run: |
+          # Use inputs if provided, otherwise fall back to config.env
+          CONTAINER_IMAGE="${{ github.event.inputs.container_image }}"
+          CONTAINER_VERSION="${{ github.event.inputs.fedora_version }}"
+          
+          if [ -z "$CONTAINER_IMAGE" ]; then
+            CONTAINER_IMAGE="${{ env.container_image }}"
+          fi
+          if [ -z "$CONTAINER_VERSION" ]; then
+            CONTAINER_VERSION="${{ env.container_version }}"
+          fi
+          
+          # Capture container digest
+          CONTAINER_DIGEST=$(cat /proc/self/cgroup | grep docker | sed 's/^.*\([0-9a-f]\{12\}\)[0-9a-f]*$/\1/' | head -1)
+          
+          # Capture kernel version
+          KERNEL_VERSION=$(uname -r)
+          
+          echo "container_image=${CONTAINER_IMAGE}:${CONTAINER_VERSION}" >> $GITHUB_OUTPUT
+          echo "container_digest=${CONTAINER_DIGEST}" >> $GITHUB_OUTPUT
+          echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Update spec files with new version
         if: github.event_name == 'push'
@@ -83,6 +132,7 @@ jobs:
           cp specs/*.spec ~/rpmbuild/SPECS/
 
       - name: Build akmod-maccel
+        if: github.event.inputs.build_akmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba akmod-maccel.spec
@@ -90,9 +140,32 @@ jobs:
           MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Build maccel CLI
+        if: github.event.inputs.build_cli == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba maccel.spec
+        env:
+          MACCEL_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Build kmod-maccel
+        if: github.event.inputs.build_kmod == 'true'
+        run: |
+          cd ~/rpmbuild/SPECS
+          rpmbuild -ba kmod-maccel.spec
+          
+          # Get kernel version
+          KVER=$(uname -r)
+          
+          # Rename kmod package to include kernel version
+          cd ~/rpmbuild/RPMS/x86_64
+          for rpm in kmod-maccel-*.rpm; do
+            if [[ "$rpm" != *"+"* ]]; then
+              # Extract version and release from filename
+              # kmod-maccel-0.5.6-1.fc41.x86_64.rpm -> kmod-maccel-0.5.6-1+6.12.1.fc41.x86_64.rpm
+              NEW_NAME=$(echo "$rpm" | sed "s/\.fc[0-9]*\.x86_64\.rpm/+${KVER}.x86_64.rpm/")
+              mv "$rpm" "$NEW_NAME"
+            fi
+          done
         env:
           MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
@@ -121,14 +194,23 @@ jobs:
       - name: Prepare release packages
         run: |
           mkdir -p release-packages
-          # Copy only the main packages (exclude kmodtool-generated stubs)
-          cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm release-packages/
-          cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/
+          # Copy akmod packages if built
+          if [ "${{ github.event.inputs.build_akmod }}" == "true" ]; then
+            cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm release-packages/ 2>/dev/null || true
+          fi
+          # Copy CLI packages if built
+          if [ "${{ github.event.inputs.build_cli }}" == "true" ]; then
+            cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/ 2>/dev/null || true
+          fi
+          # Copy kmod packages if built
+          if [ "${{ github.event.inputs.build_kmod }}" == "true" ]; then
+            cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm release-packages/ 2>/dev/null || true
+          fi
           # Exclude akmod-akmod-maccel and kmod-akmod-maccel (kmodtool stubs)
           rm -f release-packages/akmod-akmod-maccel-*.rpm
           rm -f release-packages/kmod-akmod-maccel-*.rpm
-          # Copy source RPMs
-          cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/
+          # Copy source RPMs if any packages were built
+          cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/ 2>/dev/null || true
           
       - name: Create repository metadata
         run: |
@@ -163,35 +245,19 @@ jobs:
           tag_name: build-${{ needs.build-rpm.outputs.version }}
           files: artifacts/release-packages/*
           body: |
-            RPM packages for maccel
-            ${{ needs.build-rpm.outputs.version }}
+            RPM packages for maccel ${{ needs.build-rpm.outputs.version }}
 
-            ## Installation
+            **Build Information:**
+            - Container Image: `${{ needs.build-rpm.outputs.container_image }}`
+            - Container Digest: `${{ needs.build-rpm.outputs.container_digest }}`
+            - Kernel Version: `${{ needs.build-rpm.outputs.kernel_version }}`
 
+            **Installation:**
             ```bash
-            # Download and install the .repo file
-            REPO_URL="https://raw.githubusercontent.com"
-            sudo wget \
-              ${REPO_URL}/${{ github.repository }}/main/maccel.repo \
-              -O /etc/yum.repos.d/maccel.repo
-
-            # Install maccel
-            sudo dnf install maccel
+            sudo wget https://raw.githubusercontent.com/${{ github.repository }}/main/maccel.repo -O /etc/yum.repos.d/maccel.repo && sudo dnf install maccel
             ```
 
-            ## Packages
-
-            - akmod-maccel: Automatic kernel module package
-            - maccel: CLI tool for configuring mouse acceleration
-
-            ## Post-installation
-
-            ```bash
-            # Add your user to the maccel group
-            sudo usermod -aG maccel $USER
-
-            # Log out and back in for group changes to take effect
-            ```
+            **Post-install:** `sudo usermod -aG maccel $USER` (log out and back in)
 
       - name: Prepare merged repository
         run: |

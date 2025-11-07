@@ -16,6 +16,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Load container config
+        id: config
+        run: |
+          source .github/workflows/config.env
+          echo "container_image=$CONTAINER_IMAGE" >> $GITHUB_ENV
+          echo "container_version=$CONTAINER_VERSION" >> $GITHUB_ENV
+
       - name: Get latest maccel release
         id: get_release
         run: |
@@ -56,16 +63,103 @@ jobs:
       - name: Commit and push changes
         if: steps.check_new.outputs.is_new == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .external_release_tag
           LATEST="${{ steps.get_release.outputs.latest_tag }}"
           git commit -m "chore: update maccel release to $LATEST" && \
             git push
 
-      - name: Trigger RPM build workflow
+      - name: Check latest container image
+        id: get_image
+        run: |
+          IMAGE_FULL="${{ env.container_image }}"
+          
+          # Determine registry and parse image name
+          if [[ "$IMAGE_FULL" == ghcr.io/* ]]; then
+            # GitHub Container Registry
+            IMAGE_PATH="${IMAGE_FULL#ghcr.io/}"
+            LATEST_IMAGE_TAG=$(curl -s "https://ghcr.io/v2/${IMAGE_PATH}/tags/list" | jq -r '.tags[0]')
+          elif [[ "$IMAGE_FULL" == quay.io/* ]]; then
+            # Quay.io
+            IMAGE_PATH="${IMAGE_FULL#quay.io/}"
+            LATEST_IMAGE_TAG=$(curl -s "https://quay.io/api/v1/repository/${IMAGE_PATH}/tag/?limit=1&page=1" | jq -r '.tags[0].name')
+          else
+            # Docker Hub (default registry)
+            LATEST_IMAGE_TAG=$(curl -s "https://registry.hub.docker.com/v2/library/${IMAGE_FULL}/tags/list" | jq -r '.tags[0]')
+          fi
+          
+          echo "latest_image_tag=$LATEST_IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest container image tag: $LATEST_IMAGE_TAG"
+
+      - name: Extract kernel version from image
+        id: extract_kernel
+        run: |
+          IMAGE_FULL="${{ env.container_image }}"
+          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          
+          # Pull image and extract kernel version
+          docker pull "${IMAGE_FULL}:${LATEST_IMAGE_TAG}"
+          KERNEL_VERSION=$(docker run --rm "${IMAGE_FULL}:${LATEST_IMAGE_TAG}" uname -r)
+          
+          echo "kernel_version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Extracted kernel version: $KERNEL_VERSION"
+
+      - name: Check if kernel version changed
+        id: check_image_new
+        run: |
+          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+          
+          if [ -f .external_image_tag ]; then
+            CURRENT_IMAGE_TAG=$(cat .external_image_tag)
+            echo "Current tracked image tag: $CURRENT_IMAGE_TAG"
+          else
+            CURRENT_IMAGE_TAG=""
+            echo "No existing image tag file found"
+          fi
+          
+          if [ -f .external_kernel_version ]; then
+            CURRENT_KERNEL_VERSION=$(cat .external_kernel_version)
+            echo "Current tracked kernel version: $CURRENT_KERNEL_VERSION"
+          else
+            CURRENT_KERNEL_VERSION=""
+            echo "No existing kernel version file found"
+          fi
+          
+          if [ "$LATEST_KERNEL_VERSION" != "$CURRENT_KERNEL_VERSION" ]; then
+            echo "is_new=true" >> "$GITHUB_OUTPUT"
+            echo "New kernel version detected: $LATEST_KERNEL_VERSION"
+          else
+            echo "is_new=false" >> "$GITHUB_OUTPUT"
+            echo "No kernel version change (current: $CURRENT_KERNEL_VERSION)"
+          fi
+
+      - name: Update image and kernel version files
+        if: steps.check_image_new.outputs.is_new == 'true'
+        run: |
+          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+          echo "$LATEST_IMAGE_TAG" > .external_image_tag
+          echo "$LATEST_KERNEL_VERSION" > .external_kernel_version
+
+      - name: Commit and push image updates
+        if: steps.check_image_new.outputs.is_new == 'true'
+        run: |
+          git add .external_image_tag .external_kernel_version
+          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+          git commit -m "chore: update container image to $LATEST_IMAGE_TAG (kernel $LATEST_KERNEL_VERSION)" && \
+            git push
+
+      - name: Trigger RPM build workflow (maccel update)
         if: steps.check_new.outputs.is_new == 'true'
         run: |
           gh workflow run build-rpm.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger RPM build workflow (image update - kmod only)
+        if: steps.check_image_new.outputs.is_new == 'true'
+        run: |
+          gh workflow run build-rpm.yml -f build_akmod=false -f build_cli=false -f build_kmod=true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

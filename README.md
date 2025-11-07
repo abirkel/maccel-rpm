@@ -101,6 +101,72 @@ Having issues? Check out the [Troubleshooting Guide](TROUBLESHOOTING.md) for sol
 
 For additional help, see the [upstream maccel issues](https://github.com/Gnarus-G/maccel/issues) or [open an issue](https://github.com/abirkel/maccel-rpm/issues) in this repository.
 
+## Build Workflows
+
+This repository uses automated GitHub Actions workflows to build and publish RPM packages.
+
+### Automatic Builds
+
+**Maccel Release Detection** (`check-release.yml`)
+- Runs daily to check for new maccel releases
+- Automatically triggers a full build (akmod + CLI) when a new release is detected
+- Commits version updates to the repository
+
+**Container Image Monitoring**
+- Monitors the container image specified in `.github/workflows/config.env`
+- Detects kernel version changes in the image
+- Automatically triggers kmod-only rebuilds when the kernel updates
+- Supports multiple registries: GitHub Container Registry (ghcr.io), Quay.io, and Docker Hub
+
+### Manual Builds
+
+Trigger builds manually via GitHub Actions with custom options:
+
+**Full Build** (all packages)
+```bash
+gh workflow run build-rpm.yml
+```
+
+**Kmod Only** (for kernel updates)
+```bash
+gh workflow run build-rpm.yml \
+  -f build_akmod=false \
+  -f build_cli=false \
+  -f build_kmod=true
+```
+
+**Custom Container Image**
+```bash
+gh workflow run build-rpm.yml \
+  -f container_image=quay.io/ublue/aurora \
+  -f fedora_version=40
+```
+
+### Build Configuration
+
+Edit `.github/workflows/config.env` to customize the default container image:
+
+```env
+CONTAINER_IMAGE=fedora
+CONTAINER_VERSION=latest
+```
+
+For U-Blue images:
+```env
+CONTAINER_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
+CONTAINER_VERSION=latest
+```
+
+### Build Inputs
+
+The `build-rpm.yml` workflow accepts these inputs:
+
+- `build_akmod` (boolean, default: true) - Build akmod package
+- `build_cli` (boolean, default: true) - Build CLI package
+- `build_kmod` (boolean, default: false) - Build kmod package
+- `container_image` (string, default: fedora) - Container image to use for building
+- `fedora_version` (string, default: latest) - Fedora/container version tag
+
 ## Building Locally
 
 Want to build the packages yourself or modify them? See the [Building Guide](BUILDING.md) for detailed instructions on local development.
