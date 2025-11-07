@@ -82,39 +82,6 @@ jobs:
         run: |
           cp specs/*.spec ~/rpmbuild/SPECS/
 
-      - name: Generate changelog from releases
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-          
-          # Fetch release info from GitHub API
-          RELEASE_JSON=$(curl -s "https://api.github.com/repos/Gnarus-G/maccel/releases/tags/${VERSION}")
-          
-          # Extract release notes using grep/sed (no jq needed)
-          RELEASE_NOTES=$(echo "$RELEASE_JSON" | grep -o '"body":"[^"]*"' | sed 's/"body":"//;s/"$//' | sed 's/\\n/\n/g' | head -20)
-          
-          # Get current date for changelog
-          CHANGELOG_DATE=$(date "+%a %b %d %Y")
-          
-          # Generate changelog entry
-          CHANGELOG_ENTRY="* ${CHANGELOG_DATE} Maccel RPM Builder <maccel-rpm-signing@noreply.github.com> - ${VERSION#v}-1"
-          
-          # Format release notes as changelog items (prefix non-empty lines with -)
-          FORMATTED_NOTES=$(echo "${RELEASE_NOTES}" | sed '/^$/d' | sed 's/^/- /' | head -20)
-          
-          # If no release notes found, add a default entry
-          if [ -z "$FORMATTED_NOTES" ]; then
-            FORMATTED_NOTES="- Release ${VERSION}"
-          fi
-          
-          # Append to spec files
-          for spec in ~/rpmbuild/SPECS/maccel.spec ~/rpmbuild/SPECS/akmod-maccel.spec; do
-            # Remove the placeholder changelog line
-            sed -i '/# Changelog will be generated from upstream releases/d' "$spec"
-            # Add the generated changelog
-            echo "${CHANGELOG_ENTRY}" >> "$spec"
-            echo "${FORMATTED_NOTES}" >> "$spec"
-          done
-
       - name: Build akmod-maccel
         run: |
           cd ~/rpmbuild/SPECS
