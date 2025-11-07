@@ -44,6 +44,24 @@ jobs:
           VERSION=$(cat .external_release_tag)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Update spec files with new version
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          VERSION_NUM=${VERSION#v}
+          CHANGELOG_DATE=$(date "+%a %b %d %Y")
+          MAINTAINER="github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+
+          for spec in specs/*.spec; do
+            # Update Version field
+            sed -i "s/^Version:.*/Version:        ${VERSION_NUM}/" "$spec"
+
+            # Generate changelog entry
+            CHANGELOG_ENTRY="* ${CHANGELOG_DATE} ${MAINTAINER} - ${VERSION_NUM}-1\n- Update to maccel version ${VERSION_NUM}"
+
+            # Insert changelog entry after %changelog line
+            sed -i "/^%changelog$/a ${CHANGELOG_ENTRY}" "$spec"
+          done
+
       - name: Install build dependencies
         run: |
           dnf install -y rpm-build rpmdevtools rpmlint akmods \
