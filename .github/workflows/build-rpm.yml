@@ -83,8 +83,10 @@ jobs:
           source .github/workflows/config.env
 
           # Use workflow inputs if provided, otherwise use defaults
-          CONTAINER_IMAGE="${{ github.event.inputs.container_image }}:-$CONTAINER_IMAGE"
-          CONTAINER_VERSION="${{ github.event.inputs.fedora_version }}:-$CONTAINER_VERSION"
+          INPUT_IMAGE="${{ github.event.inputs.container_image }}"
+          INPUT_VERSION="${{ github.event.inputs.fedora_version }}"
+          CONTAINER_IMAGE="${INPUT_IMAGE:-$CONTAINER_IMAGE}"
+          CONTAINER_VERSION="${INPUT_VERSION:-$CONTAINER_VERSION}"
 
           # Capture image digest using docker inspect
           IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
