@@ -19,7 +19,7 @@ jobs:
       - name: Load container config
         id: config
         run: |
-          source .github/workflows/config.env
+          source build.conf
           echo "container_image=$CONTAINER_IMAGE" >> $GITHUB_ENV
           echo "container_version=$CONTAINER_VERSION" >> $GITHUB_ENV
           echo "enable_kmod=$ENABLE_KMOD" >> $GITHUB_OUTPUT
