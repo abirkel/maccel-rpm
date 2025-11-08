@@ -83,6 +83,7 @@ jobs:
     if: github.event.inputs.update_specs == 'true'
     outputs:
       version: ${{ steps.version.outputs.version }}
+      commit_sha: ${{ steps.commit.outputs.sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -161,11 +162,15 @@ jobs:
           done
 
       - name: Commit updated spec files
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add specs/*.spec
           git commit -m "chore: update spec files to version ${{ steps.version.outputs.version }}" && git push
+          
+          # Capture the commit SHA
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
   build-rpm:
     needs: [load-config, update-specs]
@@ -479,3 +484,25 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: repo
           keep_files: true
+
+  cleanup-on-failure:
+    needs: [update-specs, build-rpm, publish]
+    runs-on: ubuntu-latest
+    if: failure() && needs.update-specs.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Revert spec update commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          COMMIT_SHA="${{ needs.update-specs.outputs.commit_sha }}"
+          echo "Reverting commit: $COMMIT_SHA"
+          
+          git revert $COMMIT_SHA --no-edit
+          git push
+          echo "Successfully reverted spec update due to build/publish failure"
