@@ -58,6 +58,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Load configuration
+        id: config
+        run: |
+          source .github/workflows/config.env
+          echo "enable_kmod=$ENABLE_KMOD" >> $GITHUB_OUTPUT
+
       - name: Read maccel version
         id: version
         run: |
@@ -184,7 +190,7 @@ ${CHANGELOG_MSG}" "$spec"
           MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Build kmod-maccel
-        if: github.event.inputs.build_kmod == 'true'
+        if: github.event.inputs.build_kmod == 'true' && steps.config.outputs.enable_kmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba kmod-maccel.spec
@@ -292,25 +298,43 @@ ${CHANGELOG_MSG}" "$spec"
           name: rpm-packages
           path: artifacts/
 
+      - name: Prepare release notes
+        id: release_notes
+        run: |
+          source .github/workflows/config.env
+          
+          NOTES="RPM packages for maccel ${{ needs.build-rpm.outputs.version }}
+
+**Build Information:**
+- Container Image: \`${{ needs.build-rpm.outputs.container_image }}\`
+- Container Digest: \`${{ needs.build-rpm.outputs.container_digest }}\`
+- Kernel Version: \`${{ needs.build-rpm.outputs.kernel_version }}\`"
+          
+          if [ "$ENABLE_KMOD" != "true" ]; then
+            NOTES="$NOTES
+
+⚠️ **Note:** kmod packages are explicitly disabled in this build (ENABLE_KMOD=false in config.env)"
+          fi
+          
+          NOTES="$NOTES
+
+**Installation:**
+\`\`\`bash
+sudo wget https://raw.githubusercontent.com/${{ github.repository }}/main/maccel.repo -O /etc/yum.repos.d/maccel.repo && sudo dnf install maccel
+\`\`\`
+
+**Post-install:** \`sudo usermod -aG maccel \$USER\` (log out and back in)"
+          
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create release with packages
         uses: softprops/action-gh-release@v1
         with:
           tag_name: build-${{ needs.build-rpm.outputs.version }}
           files: artifacts/release-packages/*
-          body: |
-            RPM packages for maccel ${{ needs.build-rpm.outputs.version }}
-
-            **Build Information:**
-            - Container Image: `${{ needs.build-rpm.outputs.container_image }}`
-            - Container Digest: `${{ needs.build-rpm.outputs.container_digest }}`
-            - Kernel Version: `${{ needs.build-rpm.outputs.kernel_version }}`
-
-            **Installation:**
-            ```bash
-            sudo wget https://raw.githubusercontent.com/${{ github.repository }}/main/maccel.repo -O /etc/yum.repos.d/maccel.repo && sudo dnf install maccel
-            ```
-
-            **Post-install:** `sudo usermod -aG maccel $USER` (log out and back in)
+          body: ${{ steps.release_notes.outputs.notes }}
 
       - name: Prepare merged repository
         run: |

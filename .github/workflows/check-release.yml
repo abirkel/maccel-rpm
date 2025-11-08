@@ -22,6 +22,7 @@ jobs:
           source .github/workflows/config.env
           echo "container_image=$CONTAINER_IMAGE" >> $GITHUB_ENV
           echo "container_version=$CONTAINER_VERSION" >> $GITHUB_ENV
+          echo "enable_kmod=$ENABLE_KMOD" >> $GITHUB_OUTPUT
 
       - name: Get latest maccel release
         id: get_release
@@ -69,6 +70,7 @@ jobs:
             git push
 
       - name: Pull and inspect container image
+        if: steps.config.outputs.enable_kmod == 'true'
         id: inspect_image
         run: |
           IMAGE_FULL="${{ env.container_image }}"
@@ -85,6 +87,7 @@ jobs:
           echo "Image identifier: $IMAGE_IDENTIFIER"
 
       - name: Check if image changed
+        if: steps.config.outputs.enable_kmod == 'true'
         id: check_image_new
         run: |
           IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
@@ -106,7 +109,7 @@ jobs:
           fi
 
       - name: Extract kernel version from image
-        if: steps.check_image_new.outputs.is_new == 'true'
+        if: steps.config.outputs.enable_kmod == 'true' && steps.check_image_new.outputs.is_new == 'true'
         id: extract_kernel
         run: |
           IMAGE_FULL="${{ env.container_image }}"
@@ -119,7 +122,7 @@ jobs:
           echo "Extracted kernel version: $KERNEL_VERSION"
 
       - name: Check if kernel version changed
-        if: steps.check_image_new.outputs.is_new == 'true'
+        if: steps.config.outputs.enable_kmod == 'true' && steps.check_image_new.outputs.is_new == 'true'
         id: check_kernel_new
         run: |
           LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
@@ -141,7 +144,7 @@ jobs:
           fi
 
       - name: Update image and kernel version files
-        if: steps.check_kernel_new.outputs.is_new == 'true'
+        if: steps.config.outputs.enable_kmod == 'true' && steps.check_kernel_new.outputs.is_new == 'true'
         run: |
           IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
           LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
@@ -149,7 +152,7 @@ jobs:
           echo "$LATEST_KERNEL_VERSION" > .external_kernel_version
 
       - name: Commit and push image updates
-        if: steps.check_kernel_new.outputs.is_new == 'true'
+        if: steps.config.outputs.enable_kmod == 'true' && steps.check_kernel_new.outputs.is_new == 'true'
         run: |
           git add .external_image_tag .external_kernel_version
           IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
@@ -165,7 +168,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trigger RPM build workflow (image update - kmod only)
-        if: steps.check_kernel_new.outputs.is_new == 'true'
+        if: steps.config.outputs.enable_kmod == 'true' && steps.check_kernel_new.outputs.is_new == 'true'
         run: |
           gh workflow run build-rpm.yml -f update_specs=true -f build_akmod=false -f build_cli=false -f build_kmod=true
         env:
