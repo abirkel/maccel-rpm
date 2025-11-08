@@ -64,25 +64,6 @@ jobs:
             echo "No new release (current: $CURRENT_TAG)"
           fi
 
-      - name: Update versions file (maccel)
-        if: steps.check_new.outputs.is_new == 'true'
-        run: |
-          LATEST="${{ steps.get_release.outputs.latest_tag }}"
-          CURRENT_IMAGE="${{ steps.load_versions.outputs.image_identifier }}"
-          CURRENT_KERNEL="${{ steps.load_versions.outputs.kernel_version }}"
-
-          {
-            echo "MACCEL_VERSION=$LATEST"
-            echo "IMAGE_IDENTIFIER=$CURRENT_IMAGE"
-            echo "KERNEL_VERSION=$CURRENT_KERNEL"
-          } > .external_versions
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .external_versions
-          git commit -m "chore: update maccel release to $LATEST" && \
-            git push
-
       - name: Pull and inspect container image
         if: steps.config.outputs.enable_kmod == 'true'
         id: inspect_image
@@ -158,30 +139,45 @@ jobs:
             echo "No kernel version change (current: $CURRENT_KERNEL_VERSION)"
           fi
 
-      - name: Update versions file (image/kernel)
+      - name: Update versions file
         if: |
-          steps.config.outputs.enable_kmod == 'true' &&
-          steps.check_kernel_new.outputs.is_new == 'true' &&
-          steps.check_new.outputs.is_new != 'true'
+          steps.check_new.outputs.is_new == 'true' ||
+          (steps.config.outputs.enable_kmod == 'true' &&
+           steps.check_kernel_new.outputs.is_new == 'true')
         run: |
-          # Use the latest maccel version we already fetched
+          # Always use latest maccel version
           MACCEL_VERSION="${{ steps.get_release.outputs.latest_tag }}"
-          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
-          LATEST_KVER="${{ steps.extract_kernel.outputs.kernel_version }}"
-          LATEST_KERNEL_VERSION="$LATEST_KVER"
 
+          # Use new image/kernel if checked, otherwise keep old values
+          if [ "${{ steps.config.outputs.enable_kmod }}" == "true" ]; then
+            IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
+            KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+          else
+            IMAGE_IDENTIFIER="${{ steps.load_versions.outputs.image_identifier }}"
+            KERNEL_VERSION="${{ steps.load_versions.outputs.kernel_version }}"
+          fi
+
+          # Write complete file
           {
             echo "MACCEL_VERSION=$MACCEL_VERSION"
             echo "IMAGE_IDENTIFIER=$IMAGE_IDENTIFIER"
-            echo "KERNEL_VERSION=$LATEST_KERNEL_VERSION"
+            echo "KERNEL_VERSION=$KERNEL_VERSION"
           } > .external_versions
+
+          # Smart commit message
+          if [ "${{ steps.check_new.outputs.is_new }}" == "true" ] && \
+             [ "${{ steps.check_kernel_new.outputs.is_new }}" == "true" ]; then
+            MSG="chore: update maccel to $MACCEL_VERSION and kernel to $KERNEL_VERSION"
+          elif [ "${{ steps.check_new.outputs.is_new }}" == "true" ]; then
+            MSG="chore: update maccel to $MACCEL_VERSION"
+          else
+            MSG="chore: update container image (kernel $KERNEL_VERSION)"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .external_versions
-          git commit -m \
-            "chore: update container image (kernel $LATEST_KERNEL_VERSION)" \
-            && git push
+          git commit -m "$MSG" && git push
 
       - name: Trigger RPM build workflow
         if: |
