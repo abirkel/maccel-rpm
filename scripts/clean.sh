@@ -1,6 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
+CLEAN_WORKFLOWS=false
+
+# Parse CLI options
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --clean-workflows)
+      CLEAN_WORKFLOWS=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0 [--clean-workflows]"
+      exit 1
+      ;;
+  esac
+done
+
 echo "Starting cleanup..."
 
 # Remove all releases and their associated tags
@@ -20,7 +37,7 @@ fi
 # Empty gh-pages repo
 echo "Cleaning gh-pages repo..."
 TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 git clone --depth=1 --branch=gh-pages https://github.com/abirkel/maccel-rpm.git "$TEMP_DIR/gh-pages"
 cd "$TEMP_DIR/gh-pages"
@@ -36,6 +53,23 @@ if [ -f .external_versions ]; then
   git commit -m "chore: remove .external_versions"
 else
   echo ".external_versions not found"
+fi
+
+# Delete all workflow runs (optional)
+if [ "$CLEAN_WORKFLOWS" = true ]; then
+  echo "Deleting all workflow runs..."
+  REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+  RUNS=$(gh api "repos/$REPO/actions/runs" --jq '.workflow_runs[].id')
+  if [ -n "$RUNS" ]; then
+    while IFS= read -r run_id; do
+      echo "Deleting workflow run: $run_id"
+      gh api -X DELETE "repos/$REPO/actions/runs/$run_id" || true
+    done <<< "$RUNS"
+  else
+    echo "No workflow runs found"
+  fi
+else
+  echo "Skipping workflow run deletion (use --clean-workflows to enable)"
 fi
 
 # Final push
