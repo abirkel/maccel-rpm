@@ -64,6 +64,9 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
+      - name: Fetch latest changes
+        run: git fetch origin && git reset --hard origin/${{ github.ref_name }}
+
       - name: Load configuration
         id: config
         run: |
