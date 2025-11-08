@@ -1,5 +1,5 @@
 ---
-name: Check Maccel Release
+name: Check Upstream Versions
 
 'on':
   schedule:
@@ -178,8 +178,9 @@ jobs:
       - name: Trigger RPM build workflow (maccel update)
         if: steps.check_new.outputs.is_new == 'true'
         run: |
-          gh workflow run build-rpm.yml -f update_specs=true \
-            -f build_akmod=true -f build_cli=true -f build_kmod=false
+          gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
+            -f update_specs=true -f build_akmod=true \
+            -f build_cli=true -f build_kmod=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -188,7 +189,8 @@ jobs:
           steps.config.outputs.enable_kmod == 'true' &&
           steps.check_kernel_new.outputs.is_new == 'true'
         run: |
-          gh workflow run build-rpm.yml -f update_specs=true \
-            -f build_akmod=false -f build_cli=false -f build_kmod=true
+          gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
+            -f update_specs=true -f build_akmod=false \
+            -f build_cli=false -f build_kmod=true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
