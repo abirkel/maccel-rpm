@@ -78,16 +78,11 @@ jobs:
           echo "container_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
           echo "enable_kmod=$ENABLE_KMOD" >> $GITHUB_OUTPUT
 
-  build-rpm:
-    needs: load-config
+  update-specs:
     runs-on: ubuntu-latest
-    container:
-      image: ${{ needs.load-config.outputs.container_image }}:${{ needs.load-config.outputs.container_version }}
+    if: github.event.inputs.update_specs == 'true'
     outputs:
       version: ${{ steps.version.outputs.version }}
-      container_image: ${{ needs.load-config.outputs.container_image }}
-      container_version: ${{ needs.load-config.outputs.container_version }}
-      kernel_version: ${{ steps.build_info.outputs.kernel_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -112,25 +107,7 @@ jobs:
             exit 1
           fi
 
-      - name: Detect kernel version
-        id: build_info
-        run: |
-          set -euo pipefail
-
-          # Capture kernel version from container (not host)
-          KERNEL_VERSION=$(rpm -q kernel-devel \
-            --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
-
-          if [ -z "$KERNEL_VERSION" ]; then
-            echo "ERROR: Failed to extract kernel version"
-            exit 1
-          fi
-
-          echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
-          echo "Detected kernel version: ${KERNEL_VERSION}"
-
       - name: Update spec files with new version and release
-        if: github.event.inputs.update_specs == 'true'
         run: |
           set -euo pipefail
           VERSION=${{ steps.version.outputs.version }}
@@ -184,12 +161,69 @@ jobs:
           done
 
       - name: Commit updated spec files
-        if: github.event.inputs.update_specs == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add specs/*.spec
           git commit -m "chore: update spec files to version ${{ steps.version.outputs.version }}" && git push
+
+  build-rpm:
+    needs: [load-config, update-specs]
+    if: always() && needs.load-config.result == 'success'
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.load-config.outputs.container_image }}:${{ needs.load-config.outputs.container_version }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      container_image: ${{ needs.load-config.outputs.container_image }}
+      container_version: ${{ needs.load-config.outputs.container_version }}
+      kernel_version: ${{ steps.build_info.outputs.kernel_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Determine maccel version
+        id: version
+        run: |
+          # Use version from update-specs job if it ran, otherwise determine here
+          if [ -n "${{ needs.update-specs.outputs.version }}" ]; then
+            echo "version=${{ needs.update-specs.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "Using version from update-specs job: ${{ needs.update-specs.outputs.version }}"
+          else
+            # Use workflow input if provided, otherwise read from file
+            INPUT_VERSION="${{ github.event.inputs.maccel_version }}"
+            if [ -n "$INPUT_VERSION" ]; then
+              echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
+              echo "Using version from workflow input: $INPUT_VERSION"
+            elif [ -f .external_versions ]; then
+              source .external_versions
+              echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
+              echo "Using version from .external_versions: $MACCEL_VERSION"
+            else
+              echo "ERROR: No version specified and .external_versions not found"
+              echo "Please provide maccel_version input or ensure .external_versions exists"
+              exit 1
+            fi
+          fi
+
+      - name: Detect kernel version
+        id: build_info
+        run: |
+          set -euo pipefail
+
+          # Capture kernel version from container (not host)
+          KERNEL_VERSION=$(rpm -q kernel-devel \
+            --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
+
+          if [ -z "$KERNEL_VERSION" ]; then
+            echo "ERROR: Failed to extract kernel version"
+            exit 1
+          fi
+
+          echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
+          echo "Detected kernel version: ${KERNEL_VERSION}"
 
       - name: Install build dependencies
         run: |
