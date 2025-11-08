@@ -28,19 +28,21 @@ This workflow is designed to build kmod packages for uBlue atomic images against
 
 ### Configuration
 
-The container image is configured in `.github/workflows/config.env`:
+The container image is configured in `build.conf` at the repository root:
 
-```env
+```bash
 # For kmod builds (requires full OS with kernel-devel)
 CONTAINER_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
 CONTAINER_VERSION=latest
+ENABLE_KMOD=true
 
 # For akmod + CLI only (can use minimal image)
 # CONTAINER_IMAGE=fedora
 # CONTAINER_VERSION=latest
+# ENABLE_KMOD=false
 ```
 
-To disable kmod builds entirely and use a smaller image, set `ENABLE_KMOD=false` in the same file.
+To disable kmod builds entirely and use a smaller image, set `ENABLE_KMOD=false`.
 
 ## Prerequisites
 
@@ -64,16 +66,18 @@ cd maccel-rpm
 # Set up RPM build tree
 rpmdev-setuptree
 
-# Download the maccel source (replace VERSION with desired version)
-VERSION=v0.5.6
-wget https://github.com/Gnarus-G/maccel/archive/${VERSION}.tar.gz \
-     -O ~/rpmbuild/SOURCES/maccel-${VERSION#v}.tar.gz
-
-# Copy spec files
+# Copy spec files to see what version they specify
 cp specs/*.spec ~/rpmbuild/SPECS/
+cd ~/rpmbuild/SPECS
+
+# Check the version in the spec file
+grep "^Version:" maccel.spec
+
+# Download the maccel source (spectool reads from spec file)
+spectool -g -R akmod-maccel.spec
+spectool -g -R maccel.spec
 
 # Build the packages
-cd ~/rpmbuild/SPECS
 rpmbuild -ba akmod-maccel.spec
 rpmbuild -ba maccel.spec
 
@@ -81,6 +85,8 @@ rpmbuild -ba maccel.spec
 ls -l ~/rpmbuild/RPMS/x86_64/
 ls -l ~/rpmbuild/SRPMS/
 ```
+
+**Note**: The spec files contain the version to build. To build a different version, edit the `Version:` field in the spec files before running spectool and rpmbuild.
 
 ## Installing Local Builds
 
