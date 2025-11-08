@@ -161,15 +161,17 @@ jobs:
       - name: Update versions file (image/kernel)
         if: |
           steps.config.outputs.enable_kmod == 'true' &&
-          steps.check_kernel_new.outputs.is_new == 'true'
+          steps.check_kernel_new.outputs.is_new == 'true' &&
+          steps.check_new.outputs.is_new != 'true'
         run: |
-          CURRENT_MACCEL="${{ steps.load_versions.outputs.maccel_version }}"
+          # Use the latest maccel version we already fetched
+          MACCEL_VERSION="${{ steps.get_release.outputs.latest_tag }}"
           IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
           LATEST_KVER="${{ steps.extract_kernel.outputs.kernel_version }}"
           LATEST_KERNEL_VERSION="$LATEST_KVER"
 
           {
-            echo "MACCEL_VERSION=$CURRENT_MACCEL"
+            echo "MACCEL_VERSION=$MACCEL_VERSION"
             echo "IMAGE_IDENTIFIER=$IMAGE_IDENTIFIER"
             echo "KERNEL_VERSION=$LATEST_KERNEL_VERSION"
           } > .external_versions
