@@ -4,6 +4,11 @@ name: Build and Publish RPM Packages
 'on':
   workflow_dispatch:
     inputs:
+      maccel_version:
+        description: 'Maccel version to build (e.g., v0.5.6)'
+        required: false
+        type: string
+        default: ''
       update_specs:
         description: 'Update spec files with new version and release'
         required: false
@@ -64,22 +69,25 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
-      - name: Fetch latest changes
-        run: |
-          dnf install -y git
-          git fetch origin && git reset --hard origin/${{ github.ref_name }}
-
       - name: Load configuration
         id: config
         run: |
           source .github/workflows/config.env
           echo "enable_kmod=$ENABLE_KMOD" >> $GITHUB_OUTPUT
 
-      - name: Read maccel version
+      - name: Determine maccel version
         id: version
         run: |
-          source .external_versions
-          echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
+          # Use workflow input if provided, otherwise read from file
+          INPUT_VERSION="${{ github.event.inputs.maccel_version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
+            echo "Using version from workflow input: $INPUT_VERSION"
+          else
+            source .external_versions
+            echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
+            echo "Using version from .external_versions: $MACCEL_VERSION"
+          fi
 
       - name: Capture build info
         id: build_info

@@ -209,7 +209,10 @@ jobs:
             exit 0
           fi
 
+          MACCEL_VERSION="${{ steps.get_release.outputs.latest_tag }}"
+
           gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
+            -f maccel_version=$MACCEL_VERSION \
             -f update_specs=true \
             -f build_akmod=$BUILD_AKMOD \
             -f build_cli=$BUILD_CLI \
