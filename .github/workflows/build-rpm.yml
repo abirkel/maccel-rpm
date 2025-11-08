@@ -363,8 +363,8 @@ jobs:
           name: rpm-packages
           path: artifacts/
 
-      - name: Capture container digest
-        id: digest
+      - name: Get container build tag
+        id: container_info
         run: |
           CONTAINER_IMAGE="${{ needs.build-rpm.outputs.container_image }}"
           CONTAINER_VERSION="${{ needs.build-rpm.outputs.container_version }}"
@@ -373,19 +373,18 @@ jobs:
           # Pull image to ensure we have it locally
           docker pull "${IMAGE_FULL}"
 
-          # Extract digest
-          CONTAINER_DIGEST=$(docker inspect \
-            --format='{{index .RepoDigests 0}}' "${IMAGE_FULL}" | \
-            cut -d'@' -f2 | cut -c1-12)
+          # Extract build tag from image labels
+          BUILD_TAG=$(docker inspect \
+            --format='{{index .Config.Labels "org.opencontainers.image.version"}}' \
+            "${IMAGE_FULL}")
 
-          if [ -z "$CONTAINER_DIGEST" ]; then
-            echo "ERROR: Failed to extract container digest"
-            docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE_FULL}"
-            exit 1
+          if [ -z "$BUILD_TAG" ]; then
+            echo "WARNING: Failed to extract build tag, using container version"
+            BUILD_TAG="${CONTAINER_VERSION}"
           fi
 
-          echo "digest=${CONTAINER_DIGEST}" >> $GITHUB_OUTPUT
-          echo "Container digest: ${CONTAINER_DIGEST}"
+          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+          echo "Container build tag: ${BUILD_TAG}"
 
       - name: Prepare release notes
         id: release_notes
@@ -394,8 +393,7 @@ jobs:
 
           VER="${{ steps.version.outputs.version }}"
           IMG="${{ needs.build-rpm.outputs.container_image }}"
-          CONTAINER_VERSION="${{ needs.build-rpm.outputs.container_version }}"
-          DIG="${{ steps.digest.outputs.digest }}"
+          BUILD_TAG="${{ steps.container_info.outputs.build_tag }}"
           KVER="${{ needs.build-rpm.outputs.kernel_version }}"
           REPO="${{ github.repository }}"
 
@@ -404,8 +402,7 @@ jobs:
             echo "RPM packages for maccel **$VER**"
             echo ""
             echo "## Build Information"
-            echo "- **Container Image:** \`${IMG}:${CONTAINER_VERSION}\`"
-            echo "- **Container Digest:** \`$DIG\`"
+            echo "- **Container Image:** \`${IMG}:${BUILD_TAG}\`"
             echo "- **Kernel Version:** \`$KVER\`"
 
             if [ "$ENABLE_KMOD" != "true" ]; then
