@@ -71,8 +71,8 @@ jobs:
       - name: Read maccel version
         id: version
         run: |
-          VERSION=$(cat .external_release_tag)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          source .external_versions
+          echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
 
       - name: Capture build info
         id: build_info

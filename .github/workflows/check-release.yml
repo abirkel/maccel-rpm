@@ -34,18 +34,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Load current versions
+        id: load_versions
+        run: |
+          if [ -f .external_versions ]; then
+            source .external_versions
+            echo "maccel_version=${MACCEL_VERSION:-}" >> "$GITHUB_OUTPUT"
+            echo "image_identifier=${IMAGE_IDENTIFIER:-}" >> "$GITHUB_OUTPUT"
+            echo "kernel_version=${KERNEL_VERSION:-}" >> "$GITHUB_OUTPUT"
+          else
+            echo "maccel_version=" >> "$GITHUB_OUTPUT"
+            echo "image_identifier=" >> "$GITHUB_OUTPUT"
+            echo "kernel_version=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check if release is new
         id: check_new
         run: |
           LATEST_TAG="${{ steps.get_release.outputs.latest_tag }}"
+          CURRENT_TAG="${{ steps.load_versions.outputs.maccel_version }}"
 
-          if [ -f .external_release_tag ]; then
-            CURRENT_TAG=$(cat .external_release_tag)
-            echo "Current tracked tag: $CURRENT_TAG"
-          else
-            CURRENT_TAG=""
-            echo "No existing tag file found"
-          fi
+          echo "Current tracked tag: ${CURRENT_TAG:-none}"
 
           if [ "$LATEST_TAG" != "$CURRENT_TAG" ]; then
             echo "is_new=true" >> "$GITHUB_OUTPUT"
@@ -55,19 +64,22 @@ jobs:
             echo "No new release (current: $CURRENT_TAG)"
           fi
 
-      - name: Update release tag file
+      - name: Update versions file (maccel)
         if: steps.check_new.outputs.is_new == 'true'
         run: |
           LATEST="${{ steps.get_release.outputs.latest_tag }}"
-          echo "$LATEST" > .external_release_tag
+          CURRENT_IMAGE="${{ steps.load_versions.outputs.image_identifier }}"
+          CURRENT_KERNEL="${{ steps.load_versions.outputs.kernel_version }}"
 
-      - name: Commit and push changes
-        if: steps.check_new.outputs.is_new == 'true'
-        run: |
+          cat > .external_versions << EOF
+          MACCEL_VERSION=$LATEST
+          IMAGE_IDENTIFIER=$CURRENT_IMAGE
+          KERNEL_VERSION=$CURRENT_KERNEL
+          EOF
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .external_release_tag
-          LATEST="${{ steps.get_release.outputs.latest_tag }}"
+          git add .external_versions
           git commit -m "chore: update maccel release to $LATEST" && \
             git push
 
@@ -95,14 +107,10 @@ jobs:
         id: check_image_new
         run: |
           IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
+          CUR_IMG="${{ steps.load_versions.outputs.image_identifier }}"
+          CURRENT_IMAGE_IDENTIFIER="$CUR_IMG"
 
-          if [ -f .external_image_tag ]; then
-            CURRENT_IMAGE_IDENTIFIER=$(cat .external_image_tag)
-            echo "Current tracked image: $CURRENT_IMAGE_IDENTIFIER"
-          else
-            CURRENT_IMAGE_IDENTIFIER=""
-            echo "No existing image tag file found"
-          fi
+          echo "Current tracked image: ${CURRENT_IMAGE_IDENTIFIER:-none}"
 
           if [ "$IMAGE_IDENTIFIER" != "$CURRENT_IMAGE_IDENTIFIER" ]; then
             echo "is_new=true" >> "$GITHUB_OUTPUT"
@@ -135,15 +143,12 @@ jobs:
           steps.check_image_new.outputs.is_new == 'true'
         id: check_kernel_new
         run: |
-          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+          LATEST_KVER="${{ steps.extract_kernel.outputs.kernel_version }}"
+          CURRENT_KVER="${{ steps.load_versions.outputs.kernel_version }}"
+          LATEST_KERNEL_VERSION="$LATEST_KVER"
+          CURRENT_KERNEL_VERSION="$CURRENT_KVER"
 
-          if [ -f .external_kernel_version ]; then
-            CURRENT_KERNEL_VERSION=$(cat .external_kernel_version)
-            echo "Current tracked kernel version: $CURRENT_KERNEL_VERSION"
-          else
-            CURRENT_KERNEL_VERSION=""
-            echo "No existing kernel version file found"
-          fi
+          echo "Current tracked kernel version: ${CURRENT_KERNEL_VERSION:-none}"
 
           if [ "$LATEST_KERNEL_VERSION" != "$CURRENT_KERNEL_VERSION" ]; then
             echo "is_new=true" >> "$GITHUB_OUTPUT"
@@ -153,27 +158,28 @@ jobs:
             echo "No kernel version change (current: $CURRENT_KERNEL_VERSION)"
           fi
 
-      - name: Update image and kernel version files
+      - name: Update versions file (image/kernel)
         if: |
           steps.config.outputs.enable_kmod == 'true' &&
           steps.check_kernel_new.outputs.is_new == 'true'
         run: |
+          CURRENT_MACCEL="${{ steps.load_versions.outputs.maccel_version }}"
           IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
-          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
-          echo "$IMAGE_IDENTIFIER" > .external_image_tag
-          echo "$LATEST_KERNEL_VERSION" > .external_kernel_version
+          LATEST_KVER="${{ steps.extract_kernel.outputs.kernel_version }}"
+          LATEST_KERNEL_VERSION="$LATEST_KVER"
 
-      - name: Commit and push image updates
-        if: |
-          steps.config.outputs.enable_kmod == 'true' &&
-          steps.check_kernel_new.outputs.is_new == 'true'
-        run: |
+          cat > .external_versions << EOF
+          MACCEL_VERSION=$CURRENT_MACCEL
+          IMAGE_IDENTIFIER=$IMAGE_IDENTIFIER
+          KERNEL_VERSION=$LATEST_KERNEL_VERSION
+          EOF
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .external_image_tag .external_kernel_version
-          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
-          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
-          git commit -m "chore: update container image (kernel $LATEST_KERNEL_VERSION)" && git push
+          git add .external_versions
+          git commit -m \
+            "chore: update container image (kernel $LATEST_KERNEL_VERSION)" \
+            && git push
 
       - name: Trigger RPM build workflow (maccel update)
         if: steps.check_new.outputs.is_new == 'true'
