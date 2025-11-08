@@ -337,20 +337,20 @@ jobs:
 
           {
             echo "notes<<EOF"
-            echo "RPM packages for maccel $VER"
+            echo "RPM packages for maccel **$VER**"
             echo ""
-            echo "Build Information:"
-            echo "- Container Image: \`$IMG\`"
-            echo "- Container Digest: \`$DIG\`"
-            echo "- Kernel Version: \`$KVER\`"
+            echo "## Build Information"
+            echo "- **Container Image:** \`$IMG\`"
+            echo "- **Container Digest:** \`$DIG\`"
+            echo "- **Kernel Version:** \`$KVER\`"
 
             if [ "$ENABLE_KMOD" != "true" ]; then
               echo ""
-              echo "Note: kmod packages disabled (ENABLE_KMOD=false)"
+              echo "> **Note:** kmod packages disabled (ENABLE_KMOD=false)"
             fi
 
             echo ""
-            echo "Installation:"
+            echo "## Installation"
             echo "\`\`\`bash"
             echo "sudo wget \\"
             echo "  https://raw.githubusercontent.com/$REPO/main/maccel.repo \\"
@@ -358,7 +358,7 @@ jobs:
             echo "  sudo dnf install maccel"
             echo "\`\`\`"
             echo ""
-            echo "Post-install: \`sudo usermod -aG maccel \$USER\`"
+            echo "**Post-install:** \`sudo usermod -aG maccel \$USER\`"
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
