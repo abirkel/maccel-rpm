@@ -179,9 +179,6 @@ jobs:
           git add .external_versions
           git commit -m "$MSG" && git push
 
-          # Wait for commit to propagate before triggering build
-          sleep 10
-
       - name: Trigger RPM build workflow
         if: |
           steps.check_new.outputs.is_new == 'true' ||
