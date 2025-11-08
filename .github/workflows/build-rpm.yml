@@ -30,7 +30,9 @@ name: Build and Publish RPM Packages
         type: boolean
         default: false
       container_image:
-        description: 'Container image to use (e.g., fedora, ghcr.io/ublue-os/aurora-nvidia-open)'
+        description: |
+          Container image to use
+          (e.g., fedora, ghcr.io/ublue-os/aurora-nvidia-open)
         required: false
         type: string
         default: 'fedora'
@@ -48,7 +50,9 @@ jobs:
   build-rpm:
     runs-on: ubuntu-latest
     container:
-      image: ${{ github.event.inputs.container_image }}:${{ github.event.inputs.fedora_version }}
+      image: >-
+        ${{ github.event.inputs.container_image }}:${{
+        github.event.inputs.fedora_version }}
     outputs:
       version: ${{ steps.version.outputs.version }}
       container_image: ${{ steps.build_info.outputs.container_image }}
@@ -74,33 +78,40 @@ jobs:
         id: build_info
         run: |
           set -euo pipefail
-          
+
           # Load defaults from config
           source .github/workflows/config.env
-          
-          # Use workflow inputs if provided, otherwise use config defaults
-          CONTAINER_IMAGE="${{ github.event.inputs.container_image }:-$CONTAINER_IMAGE}"
-          CONTAINER_VERSION="${{ github.event.inputs.fedora_version }:-$CONTAINER_VERSION}"
-          
+
+          # Use workflow inputs if provided, otherwise use defaults
+          CONTAINER_IMAGE="${{ github.event.inputs.container_image \
+            }:-$CONTAINER_IMAGE}"
+          CONTAINER_VERSION="${{ github.event.inputs.fedora_version \
+            }:-$CONTAINER_VERSION}"
+
           # Capture image digest using docker inspect
           IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
-          CONTAINER_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" | cut -d'@' -f2 | cut -c1-12)
-          
+          CONTAINER_DIGEST=$(docker inspect \
+            --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" | \
+            cut -d'@' -f2 | cut -c1-12)
+
           if [ -z "$CONTAINER_DIGEST" ]; then
-            echo "ERROR: Failed to extract container digest from docker inspect"
-            docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL"
+            echo "ERROR: Failed to extract container digest"
+            docker inspect --format='{{index .RepoDigests 0}}' \
+              "$IMAGE_FULL"
             exit 1
           fi
-          
+
           # Capture kernel version from container (not host)
-          KERNEL_VERSION=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
-          
+          KERNEL_VERSION=$(rpm -q kernel-devel \
+            --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
+
           if [ -z "$KERNEL_VERSION" ]; then
-            echo "ERROR: Failed to extract kernel version from kernel-devel package"
+            echo "ERROR: Failed to extract kernel version"
             exit 1
           fi
-          
-          echo "container_image=${CONTAINER_IMAGE}:${CONTAINER_VERSION}" >> $GITHUB_OUTPUT
+
+          echo "container_image=${CONTAINER_IMAGE}:${CONTAINER_VERSION}" \
+            >> $GITHUB_OUTPUT
           echo "container_digest=${CONTAINER_DIGEST}" >> $GITHUB_OUTPUT
           echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
 
@@ -111,7 +122,8 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
           VERSION_NUM=${VERSION#v}
           CHANGELOG_DATE=$(LC_ALL=C date "+%a %b %d %Y")
-          MAINTAINER="github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          MAINTAINER="github-actions[bot] \
+            <github-actions[bot]@users.noreply.github.com>"
 
           for spec in specs/*.spec; do
             if [ ! -f "$spec" ]; then
@@ -129,7 +141,8 @@ jobs:
 
             # Extract current version and release from spec file
             CURRENT_VERSION=$(grep "^Version:" "$spec" | awk '{print $NF}')
-            CURRENT_RELEASE=$(grep "^Release:" "$spec" | awk '{print $NF}' | sed 's/%{?dist}//')
+            CURRENT_RELEASE=$(grep "^Release:" "$spec" | \
+              awk '{print $NF}' | sed 's/%{?dist}//')
 
             # Determine new release number
             if [ "$CURRENT_VERSION" = "$VERSION_NUM" ]; then
@@ -146,19 +159,22 @@ jobs:
             sed -i "s/^Version:.*/Version:        ${VERSION_NUM}/" "$spec"
 
             # Update Release field
-            sed -i "s/^Release:.*/Release:        ${NEW_RELEASE}%{?dist}/" "$spec"
+            sed -i "s/^Release:.*/Release:        ${NEW_RELEASE}%{?dist}/" \
+              "$spec"
 
             # Insert changelog entry after %changelog line
-            sed -i "/^%changelog$/a\\
-* ${CHANGELOG_DATE} ${MAINTAINER} - ${VERSION_NUM}-${NEW_RELEASE}\\
-${CHANGELOG_MSG}" "$spec"
+            ENTRY="* ${CHANGELOG_DATE} ${MAINTAINER} - "
+            ENTRY="${ENTRY}${VERSION_NUM}-${NEW_RELEASE}"
+            ENTRY="${ENTRY}\\n${CHANGELOG_MSG}"
+            sed -i "/^%changelog$/a\\${ENTRY}" "$spec"
           done
 
       - name: Install build dependencies
         run: |
           # Step 1: Install base RPM build tools
-          dnf install -y rpm-build rpmdevtools rpmlint createrepo_c rpm-sign gnupg2 pinentry spectool
-          
+          dnf install -y rpm-build rpmdevtools rpmlint createrepo_c \
+            rpm-sign gnupg2 pinentry spectool
+
           # Step 2: Install BuildRequires from spec files
           dnf builddep -y specs/*.spec
 
@@ -190,21 +206,25 @@ ${CHANGELOG_MSG}" "$spec"
           MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Build kmod-maccel
-        if: github.event.inputs.build_kmod == 'true' && steps.config.outputs.enable_kmod == 'true'
+        if: |
+          github.event.inputs.build_kmod == 'true' &&
+          steps.config.outputs.enable_kmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba kmod-maccel.spec
-          
+
           # Get kernel version from build info
           KVER="${{ steps.build_info.outputs.kernel_version }}"
-          
+
           # Rename kmod package to include kernel version
           cd ~/rpmbuild/RPMS/x86_64
           for rpm in kmod-maccel-*.rpm; do
             if [[ "$rpm" != *"+"* ]]; then
               # Extract version and release from filename
-              # kmod-maccel-0.5.6-1.fc41.x86_64.rpm -> kmod-maccel-0.5.6-1+6.12.1.fc41.x86_64.rpm
-              NEW_NAME=$(echo "$rpm" | sed "s/\.fc[0-9]*\.x86_64\.rpm/+${KVER}.x86_64.rpm/")
+              # kmod-maccel-0.5.6-1.fc41.x86_64.rpm ->
+              # kmod-maccel-0.5.6-1+6.12.1.fc41.x86_64.rpm
+              NEW_NAME=$(echo "$rpm" | \
+                sed "s/\.fc[0-9]*\.x86_64\.rpm/+${KVER}.x86_64.rpm/")
               mv "$rpm" "$NEW_NAME"
             fi
           done
@@ -229,7 +249,9 @@ ${CHANGELOG_MSG}" "$spec"
         run: |
           echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
           echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
-          echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes --pinentry-mode loopback --passphrase '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
+          echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes \
+            --pinentry-mode loopback --passphrase \
+            '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
           cd ~/rpmbuild/RPMS/x86_64
           rpm --addsign *.rpm
 
@@ -237,41 +259,45 @@ ${CHANGELOG_MSG}" "$spec"
         run: |
           set -euo pipefail
           mkdir -p release-packages
-          
+
           # Copy akmod packages if built
           if [ "${{ github.event.inputs.build_akmod }}" == "true" ]; then
-            if ls ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm 1>/dev/null 2>&1; then
-              cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm release-packages/
+            if ls ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm \
+                1>/dev/null 2>&1; then
+              cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm \
+                release-packages/
             else
-              echo "ERROR: akmod package build was requested but no packages found"
+              echo "ERROR: akmod package build requested but not found"
               exit 1
             fi
           fi
-          
+
           # Copy CLI packages if built
           if [ "${{ github.event.inputs.build_cli }}" == "true" ]; then
             if ls ~/rpmbuild/RPMS/x86_64/maccel-*.rpm 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/
             else
-              echo "ERROR: CLI package build was requested but no packages found"
+              echo "ERROR: CLI package build requested but not found"
               exit 1
             fi
           fi
-          
+
           # Copy kmod packages if built
           if [ "${{ github.event.inputs.build_kmod }}" == "true" ]; then
-            if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm 1>/dev/null 2>&1; then
-              cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm release-packages/
+            if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
+                1>/dev/null 2>&1; then
+              cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
+                release-packages/
             else
-              echo "ERROR: kmod package build was requested but no packages found"
+              echo "ERROR: kmod package build requested but not found"
               exit 1
             fi
           fi
-          
-          # Exclude akmod-akmod-maccel and kmod-akmod-maccel (kmodtool stubs)
+
+          # Exclude akmod-akmod-maccel and kmod-akmod-maccel (stubs)
           rm -f release-packages/akmod-akmod-maccel-*.rpm
           rm -f release-packages/kmod-akmod-maccel-*.rpm
-          
+
           # Copy source RPMs if any packages were built
           if ls ~/rpmbuild/SRPMS/*.src.rpm 1>/dev/null 2>&1; then
             cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/
@@ -302,32 +328,39 @@ ${CHANGELOG_MSG}" "$spec"
         id: release_notes
         run: |
           source .github/workflows/config.env
-          
-          NOTES="RPM packages for maccel ${{ needs.build-rpm.outputs.version }}
 
-**Build Information:**
-- Container Image: \`${{ needs.build-rpm.outputs.container_image }}\`
-- Container Digest: \`${{ needs.build-rpm.outputs.container_digest }}\`
-- Kernel Version: \`${{ needs.build-rpm.outputs.kernel_version }}\`"
-          
-          if [ "$ENABLE_KMOD" != "true" ]; then
-            NOTES="$NOTES
+          VER="${{ needs.build-rpm.outputs.version }}"
+          IMG="${{ needs.build-rpm.outputs.container_image }}"
+          DIG="${{ needs.build-rpm.outputs.container_digest }}"
+          KVER="${{ needs.build-rpm.outputs.kernel_version }}"
+          REPO="${{ github.repository }}"
 
-⚠️ **Note:** kmod packages are explicitly disabled in this build (ENABLE_KMOD=false in config.env)"
-          fi
-          
-          NOTES="$NOTES
+          {
+            echo "notes<<EOF"
+            echo "RPM packages for maccel $VER"
+            echo ""
+            echo "Build Information:"
+            echo "- Container Image: \`$IMG\`"
+            echo "- Container Digest: \`$DIG\`"
+            echo "- Kernel Version: \`$KVER\`"
 
-**Installation:**
-\`\`\`bash
-sudo wget https://raw.githubusercontent.com/${{ github.repository }}/main/maccel.repo -O /etc/yum.repos.d/maccel.repo && sudo dnf install maccel
-\`\`\`
+            if [ "$ENABLE_KMOD" != "true" ]; then
+              echo ""
+              echo "Note: kmod packages disabled (ENABLE_KMOD=false)"
+            fi
 
-**Post-install:** \`sudo usermod -aG maccel \$USER\` (log out and back in)"
-          
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+            echo ""
+            echo "Installation:"
+            echo "\`\`\`bash"
+            echo "sudo wget \\"
+            echo "  https://raw.githubusercontent.com/$REPO/main/maccel.repo \\"
+            echo "  -O /etc/yum.repos.d/maccel.repo && \\"
+            echo "  sudo dnf install maccel"
+            echo "\`\`\`"
+            echo ""
+            echo "Post-install: \`sudo usermod -aG maccel \$USER\`"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Create release with packages
         uses: softprops/action-gh-release@v1
@@ -340,11 +373,11 @@ sudo wget https://raw.githubusercontent.com/${{ github.repository }}/main/maccel
         run: |
           # Install createrepo_c for metadata generation
           dnf install -y createrepo_c
-          
+
           # Prepare repo directory with new packages
           mkdir -p repo
           cp artifacts/release-packages/*.rpm repo/ 2>/dev/null || true
-          
+
           # Generate repository metadata for new packages
           createrepo_c repo/
 
