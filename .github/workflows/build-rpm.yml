@@ -179,7 +179,6 @@ jobs:
     container:
       image: ${{ needs.load-config.outputs.container_image }}:${{ needs.load-config.outputs.container_version }}
     outputs:
-      version: ${{ steps.version.outputs.version }}
       container_image: ${{ needs.load-config.outputs.container_image }}
       container_version: ${{ needs.load-config.outputs.container_version }}
       kernel_version: ${{ steps.build_info.outputs.kernel_version }}
@@ -188,30 +187,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-
-      - name: Determine maccel version
-        id: version
-        run: |
-          # Use version from update-specs job if it ran, otherwise determine here
-          if [ -n "${{ needs.update-specs.outputs.version }}" ]; then
-            echo "version=${{ needs.update-specs.outputs.version }}" >> $GITHUB_OUTPUT
-            echo "Using version from update-specs job: ${{ needs.update-specs.outputs.version }}"
-          else
-            # Use workflow input if provided, otherwise read from file
-            INPUT_VERSION="${{ github.event.inputs.maccel_version }}"
-            if [ -n "$INPUT_VERSION" ]; then
-              echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
-              echo "Using version from workflow input: $INPUT_VERSION"
-            elif [ -f .external_versions ]; then
-              source .external_versions
-              echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
-              echo "Using version from .external_versions: $MACCEL_VERSION"
-            else
-              echo "ERROR: No version specified and .external_versions not found"
-              echo "Please provide maccel_version input or ensure .external_versions exists"
-              exit 1
-            fi
-          fi
 
       - name: Detect kernel version
         id: build_info
@@ -257,16 +232,12 @@ jobs:
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba akmod-maccel.spec
-        env:
-          MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Build maccel CLI
         if: github.event.inputs.build_cli == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba maccel.spec
-        env:
-          MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Build kmod-maccel
         if: |
@@ -291,8 +262,6 @@ jobs:
               mv "$rpm" "$NEW_NAME"
             fi
           done
-        env:
-          MACCEL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Lint packages
         run: |
@@ -381,6 +350,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Get version from spec
+        id: version
+        run: |
+          VERSION=$(grep "^Version:" specs/maccel.spec | awk '{print $NF}')
+          echo "version=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "Detected version from spec: v${VERSION}"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -416,7 +392,7 @@ jobs:
         run: |
           source build.conf
 
-          VER="${{ needs.build-rpm.outputs.version }}"
+          VER="${{ steps.version.outputs.version }}"
           IMG="${{ needs.build-rpm.outputs.container_image }}"
           CONTAINER_VERSION="${{ needs.build-rpm.outputs.container_version }}"
           DIG="${{ steps.digest.outputs.digest }}"
@@ -453,7 +429,7 @@ jobs:
       - name: Create release with packages
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ needs.build-rpm.outputs.version }}
+          tag_name: build-${{ steps.version.outputs.version }}
           files: artifacts/release-packages/*
           body: ${{ steps.release_notes.outputs.notes }}
 
