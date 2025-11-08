@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           akmod-maccel
-Version:        0.5.6
+Version:        0.0.0
 Release:        1%{?dist}
 Summary:        Akmod package for maccel mouse acceleration kernel module
 License:        GPL-2.0-or-later

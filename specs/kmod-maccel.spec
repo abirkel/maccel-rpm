@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 
 Name:           kmod-maccel
-Version:        0.5.6
+Version:        0.0.0
 Release:        1%{?dist}
 Summary:        Kernel module for maccel mouse acceleration driver
 License:        GPL-2.0-or-later
