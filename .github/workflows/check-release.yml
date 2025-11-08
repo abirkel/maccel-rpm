@@ -40,11 +40,9 @@ jobs:
           if [ -f .external_versions ]; then
             source .external_versions
             echo "maccel_version=${MACCEL_VERSION:-}" >> "$GITHUB_OUTPUT"
-            echo "image_identifier=${IMAGE_IDENTIFIER:-}" >> "$GITHUB_OUTPUT"
             echo "kernel_version=${KERNEL_VERSION:-}" >> "$GITHUB_OUTPUT"
           else
             echo "maccel_version=" >> "$GITHUB_OUTPUT"
-            echo "image_identifier=" >> "$GITHUB_OUTPUT"
             echo "kernel_version=" >> "$GITHUB_OUTPUT"
           fi
 
@@ -64,9 +62,9 @@ jobs:
             echo "No new release (current: $CURRENT_TAG)"
           fi
 
-      - name: Pull and inspect container image
+      - name: Check container kernel version
         if: steps.config.outputs.enable_kmod == 'true'
-        id: inspect_image
+        id: check_kernel
         run: |
           IMAGE_FULL="${{ env.container_image }}"
           CONTAINER_VERSION="${{ env.container_version }}"
@@ -74,104 +72,60 @@ jobs:
           # Pull image
           docker pull "${IMAGE_FULL}:${CONTAINER_VERSION}"
 
-          # Extract digest and build full identifier
-          IMAGE_DIGEST=$(docker inspect \
-            --format='{{index .RepoDigests 0}}' \
+          # Extract kernel version from image label
+          LATEST_KERNEL=$(docker inspect \
+            --format='{{index .Config.Labels "ostree.linux"}}' \
             "${IMAGE_FULL}:${CONTAINER_VERSION}")
-          IMAGE_IDENTIFIER="${IMAGE_FULL}:${CONTAINER_VERSION}@${IMAGE_DIGEST#*@}"
 
-          echo "image_identifier=$IMAGE_IDENTIFIER" >> "$GITHUB_OUTPUT"
-          echo "Image identifier: $IMAGE_IDENTIFIER"
-
-      - name: Check if image changed
-        if: steps.config.outputs.enable_kmod == 'true'
-        id: check_image_new
-        run: |
-          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
-          CUR_IMG="${{ steps.load_versions.outputs.image_identifier }}"
-          CURRENT_IMAGE_IDENTIFIER="$CUR_IMG"
-
-          echo "Current tracked image: ${CURRENT_IMAGE_IDENTIFIER:-none}"
-
-          if [ "$IMAGE_IDENTIFIER" != "$CURRENT_IMAGE_IDENTIFIER" ]; then
-            echo "is_new=true" >> "$GITHUB_OUTPUT"
-            echo "New image detected: $IMAGE_IDENTIFIER"
-          else
-            echo "is_new=false" >> "$GITHUB_OUTPUT"
-            echo "No image change (current: $CURRENT_IMAGE_IDENTIFIER)"
+          if [ -z "$LATEST_KERNEL" ]; then
+            echo "ERROR: Failed to extract kernel version from image labels"
+            exit 1
           fi
 
-      - name: Extract kernel version from image
-        if: |
-          steps.config.outputs.enable_kmod == 'true' &&
-          steps.check_image_new.outputs.is_new == 'true'
-        id: extract_kernel
-        run: |
-          IMAGE_FULL="${{ env.container_image }}"
-          CONTAINER_VERSION="${{ env.container_version }}"
+          CURRENT_KERNEL="${{ steps.load_versions.outputs.kernel_version }}"
 
-          # Extract kernel version from already-pulled image
-          KERNEL_VERSION=$(docker run --rm \
-            "${IMAGE_FULL}:${CONTAINER_VERSION}" rpm -q kernel-devel \
-            --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
+          echo "kernel_version=$LATEST_KERNEL" >> "$GITHUB_OUTPUT"
+          echo "Latest kernel version: $LATEST_KERNEL"
+          echo "Current tracked kernel: ${CURRENT_KERNEL:-none}"
 
-          echo "kernel_version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Extracted kernel version: $KERNEL_VERSION"
-
-      - name: Check if kernel version changed
-        if: |
-          steps.config.outputs.enable_kmod == 'true' &&
-          steps.check_image_new.outputs.is_new == 'true'
-        id: check_kernel_new
-        run: |
-          LATEST_KVER="${{ steps.extract_kernel.outputs.kernel_version }}"
-          CURRENT_KVER="${{ steps.load_versions.outputs.kernel_version }}"
-          LATEST_KERNEL_VERSION="$LATEST_KVER"
-          CURRENT_KERNEL_VERSION="$CURRENT_KVER"
-
-          echo "Current tracked kernel version: ${CURRENT_KERNEL_VERSION:-none}"
-
-          if [ "$LATEST_KERNEL_VERSION" != "$CURRENT_KERNEL_VERSION" ]; then
+          if [ "$LATEST_KERNEL" != "$CURRENT_KERNEL" ]; then
             echo "is_new=true" >> "$GITHUB_OUTPUT"
-            echo "New kernel version detected: $LATEST_KERNEL_VERSION"
+            echo "Kernel version changed"
           else
             echo "is_new=false" >> "$GITHUB_OUTPUT"
-            echo "No kernel version change (current: $CURRENT_KERNEL_VERSION)"
+            echo "No kernel version change"
           fi
 
       - name: Update versions file
         if: |
           steps.check_new.outputs.is_new == 'true' ||
           (steps.config.outputs.enable_kmod == 'true' &&
-           steps.check_kernel_new.outputs.is_new == 'true')
+           steps.check_kernel.outputs.is_new == 'true')
         run: |
           # Always use latest maccel version
           MACCEL_VERSION="${{ steps.get_release.outputs.latest_tag }}"
 
-          # Use new image/kernel if checked, otherwise keep old values
+          # Use new kernel if checked, otherwise keep old value
           if [ "${{ steps.config.outputs.enable_kmod }}" == "true" ]; then
-            IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
-            KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+            KERNEL_VERSION="${{ steps.check_kernel.outputs.kernel_version }}"
           else
-            IMAGE_IDENTIFIER="${{ steps.load_versions.outputs.image_identifier }}"
             KERNEL_VERSION="${{ steps.load_versions.outputs.kernel_version }}"
           fi
 
           # Write complete file
           {
             echo "MACCEL_VERSION=$MACCEL_VERSION"
-            echo "IMAGE_IDENTIFIER=$IMAGE_IDENTIFIER"
             echo "KERNEL_VERSION=$KERNEL_VERSION"
           } > .external_versions
 
           # Smart commit message
           if [ "${{ steps.check_new.outputs.is_new }}" == "true" ] && \
-             [ "${{ steps.check_kernel_new.outputs.is_new }}" == "true" ]; then
+             [ "${{ steps.check_kernel.outputs.is_new }}" == "true" ]; then
             MSG="chore: update maccel to $MACCEL_VERSION and kernel to $KERNEL_VERSION"
           elif [ "${{ steps.check_new.outputs.is_new }}" == "true" ]; then
             MSG="chore: update maccel to $MACCEL_VERSION"
           else
-            MSG="chore: update container image (kernel $KERNEL_VERSION)"
+            MSG="chore: update kernel to $KERNEL_VERSION"
           fi
 
           git config user.name "github-actions[bot]"
@@ -183,11 +137,11 @@ jobs:
         if: |
           steps.check_new.outputs.is_new == 'true' ||
           (steps.config.outputs.enable_kmod == 'true' &&
-           steps.check_kernel_new.outputs.is_new == 'true')
+           steps.check_kernel.outputs.is_new == 'true')
         run: |
           # Determine what to build based on what changed
           MACCEL_NEW="${{ steps.check_new.outputs.is_new }}"
-          KERNEL_NEW="${{ steps.check_kernel_new.outputs.is_new }}"
+          KERNEL_NEW="${{ steps.check_kernel.outputs.is_new }}"
           ENABLE_KMOD="${{ steps.config.outputs.enable_kmod }}"
 
           # If maccel is new, build akmod and cli (and kmod if enabled)
