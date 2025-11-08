@@ -416,11 +416,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y createrepo-c
 
-          # Prepare repo directory with new packages
+          # Clone existing gh-pages branch to get current packages
+          git clone --depth=1 --branch=gh-pages \
+            https://github.com/${{ github.repository }}.git gh-pages-repo \
+            || mkdir -p gh-pages-repo
+
+          # Prepare repo with existing + new packages
           mkdir -p repo
+          cp -r gh-pages-repo/* repo/ 2>/dev/null || true
           cp artifacts/release-packages/*.rpm repo/ 2>/dev/null || true
 
-          # Generate repository metadata for new packages
+          # Regenerate metadata for ALL packages
           createrepo_c repo/
 
       - name: Deploy repo to GitHub Pages
