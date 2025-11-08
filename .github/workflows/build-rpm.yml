@@ -197,7 +197,9 @@ jobs:
 
       - name: Download maccel source
         run: |
-          spectool -g -R specs/*.spec
+          for spec in specs/*.spec; do
+            spectool -g -R "$spec"
+          done
 
       - name: Copy spec files
         run: |
