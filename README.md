@@ -147,15 +147,19 @@ gh workflow run build-rpm.yml \
 Edit `.github/workflows/config.env` to customize the default container image:
 
 ```env
-CONTAINER_IMAGE=fedora
-CONTAINER_VERSION=latest
-```
-
-For U-Blue images:
-```env
 CONTAINER_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
 CONTAINER_VERSION=latest
 ```
+
+**Container Requirements**:
+
+This workflow is designed to build kmod packages for uBlue atomic images. uBlue images often ship with kernels slightly behind Fedora main, and the corresponding kernel-devel packages are no longer available in standard repositories—they only exist in the images themselves.
+
+- **For kmod builds**: Requires a full OS container with kernel-devel installed (e.g., Aurora)
+- **For akmod + CLI only**: Can use smaller Fedora images (e.g., `fedora:latest`)
+- **To disable kmod**: Set `ENABLE_KMOD=false` in `.github/workflows/config.env`
+
+See [Building Guide](BUILDING.md) for detailed container selection guidance.
 
 ### Build Inputs
 
