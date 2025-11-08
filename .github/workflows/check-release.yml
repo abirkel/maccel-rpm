@@ -71,11 +71,11 @@ jobs:
           CURRENT_IMAGE="${{ steps.load_versions.outputs.image_identifier }}"
           CURRENT_KERNEL="${{ steps.load_versions.outputs.kernel_version }}"
 
-          cat > .external_versions << EOF
-          MACCEL_VERSION=$LATEST
-          IMAGE_IDENTIFIER=$CURRENT_IMAGE
-          KERNEL_VERSION=$CURRENT_KERNEL
-          EOF
+          {
+            echo "MACCEL_VERSION=$LATEST"
+            echo "IMAGE_IDENTIFIER=$CURRENT_IMAGE"
+            echo "KERNEL_VERSION=$CURRENT_KERNEL"
+          } > .external_versions
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -168,11 +168,11 @@ jobs:
           LATEST_KVER="${{ steps.extract_kernel.outputs.kernel_version }}"
           LATEST_KERNEL_VERSION="$LATEST_KVER"
 
-          cat > .external_versions << EOF
-          MACCEL_VERSION=$CURRENT_MACCEL
-          IMAGE_IDENTIFIER=$IMAGE_IDENTIFIER
-          KERNEL_VERSION=$LATEST_KERNEL_VERSION
-          EOF
+          {
+            echo "MACCEL_VERSION=$CURRENT_MACCEL"
+            echo "IMAGE_IDENTIFIER=$IMAGE_IDENTIFIER"
+            echo "KERNEL_VERSION=$LATEST_KERNEL_VERSION"
+          } > .external_versions
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -181,22 +181,40 @@ jobs:
             "chore: update container image (kernel $LATEST_KERNEL_VERSION)" \
             && git push
 
-      - name: Trigger RPM build workflow (maccel update)
-        if: steps.check_new.outputs.is_new == 'true'
-        run: |
-          gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
-            -f update_specs=true -f build_akmod=true \
-            -f build_cli=true -f build_kmod=false
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger RPM build workflow (image update - kmod only)
+      - name: Trigger RPM build workflow
         if: |
-          steps.config.outputs.enable_kmod == 'true' &&
-          steps.check_kernel_new.outputs.is_new == 'true'
+          steps.check_new.outputs.is_new == 'true' ||
+          (steps.config.outputs.enable_kmod == 'true' &&
+           steps.check_kernel_new.outputs.is_new == 'true')
         run: |
+          # Determine what to build based on what changed
+          MACCEL_NEW="${{ steps.check_new.outputs.is_new }}"
+          KERNEL_NEW="${{ steps.check_kernel_new.outputs.is_new }}"
+          ENABLE_KMOD="${{ steps.config.outputs.enable_kmod }}"
+
+          # If maccel is new, build akmod and cli (and kmod if enabled)
+          # If only kernel is new, build kmod only (if enabled)
+          if [ "$MACCEL_NEW" == "true" ]; then
+            BUILD_AKMOD=true
+            BUILD_CLI=true
+            if [ "$ENABLE_KMOD" == "true" ]; then
+              BUILD_KMOD=true
+            else
+              BUILD_KMOD=false
+            fi
+          elif [ "$KERNEL_NEW" == "true" ] && [ "$ENABLE_KMOD" == "true" ]; then
+            BUILD_AKMOD=false
+            BUILD_CLI=false
+            BUILD_KMOD=true
+          else
+            echo "Nothing to build"
+            exit 0
+          fi
+
           gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
-            -f update_specs=true -f build_akmod=false \
-            -f build_cli=false -f build_kmod=true
+            -f update_specs=true \
+            -f build_akmod=$BUILD_AKMOD \
+            -f build_cli=$BUILD_CLI \
+            -f build_kmod=$BUILD_KMOD
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
