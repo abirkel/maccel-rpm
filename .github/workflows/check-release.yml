@@ -68,54 +68,61 @@ jobs:
           git commit -m "chore: update maccel release to $LATEST" && \
             git push
 
-      - name: Check latest container image
-        id: get_image
+      - name: Pull and inspect container image
+        id: inspect_image
         run: |
           IMAGE_FULL="${{ env.container_image }}"
+          CONTAINER_VERSION="${{ env.container_version }}"
           
-          # Determine registry and parse image name
-          if [[ "$IMAGE_FULL" == ghcr.io/* ]]; then
-            # GitHub Container Registry
-            IMAGE_PATH="${IMAGE_FULL#ghcr.io/}"
-            LATEST_IMAGE_TAG=$(curl -s "https://ghcr.io/v2/${IMAGE_PATH}/tags/list" | jq -r '.tags[0]')
-          elif [[ "$IMAGE_FULL" == quay.io/* ]]; then
-            # Quay.io
-            IMAGE_PATH="${IMAGE_FULL#quay.io/}"
-            LATEST_IMAGE_TAG=$(curl -s "https://quay.io/api/v1/repository/${IMAGE_PATH}/tag/?limit=1&page=1" | jq -r '.tags[0].name')
+          # Pull image
+          docker pull "${IMAGE_FULL}:${CONTAINER_VERSION}"
+          
+          # Extract digest and build full identifier
+          IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE_FULL}:${CONTAINER_VERSION}")
+          IMAGE_IDENTIFIER="${IMAGE_FULL}:${CONTAINER_VERSION}@${IMAGE_DIGEST#*@}"
+          
+          echo "image_identifier=$IMAGE_IDENTIFIER" >> "$GITHUB_OUTPUT"
+          echo "Image identifier: $IMAGE_IDENTIFIER"
+
+      - name: Check if image changed
+        id: check_image_new
+        run: |
+          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
+          
+          if [ -f .external_image_tag ]; then
+            CURRENT_IMAGE_IDENTIFIER=$(cat .external_image_tag)
+            echo "Current tracked image: $CURRENT_IMAGE_IDENTIFIER"
           else
-            # Docker Hub (default registry)
-            LATEST_IMAGE_TAG=$(curl -s "https://registry.hub.docker.com/v2/library/${IMAGE_FULL}/tags/list" | jq -r '.tags[0]')
+            CURRENT_IMAGE_IDENTIFIER=""
+            echo "No existing image tag file found"
           fi
           
-          echo "latest_image_tag=$LATEST_IMAGE_TAG" >> "$GITHUB_OUTPUT"
-          echo "Latest container image tag: $LATEST_IMAGE_TAG"
+          if [ "$IMAGE_IDENTIFIER" != "$CURRENT_IMAGE_IDENTIFIER" ]; then
+            echo "is_new=true" >> "$GITHUB_OUTPUT"
+            echo "New image detected: $IMAGE_IDENTIFIER"
+          else
+            echo "is_new=false" >> "$GITHUB_OUTPUT"
+            echo "No image change (current: $CURRENT_IMAGE_IDENTIFIER)"
+          fi
 
       - name: Extract kernel version from image
+        if: steps.check_image_new.outputs.is_new == 'true'
         id: extract_kernel
         run: |
           IMAGE_FULL="${{ env.container_image }}"
-          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          CONTAINER_VERSION="${{ env.container_version }}"
           
-          # Pull image and extract kernel version
-          docker pull "${IMAGE_FULL}:${LATEST_IMAGE_TAG}"
-          KERNEL_VERSION=$(docker run --rm "${IMAGE_FULL}:${LATEST_IMAGE_TAG}" uname -r)
+          # Extract kernel version from already-pulled image
+          KERNEL_VERSION=$(docker run --rm "${IMAGE_FULL}:${CONTAINER_VERSION}" rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
           
           echo "kernel_version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
           echo "Extracted kernel version: $KERNEL_VERSION"
 
       - name: Check if kernel version changed
-        id: check_image_new
+        if: steps.check_image_new.outputs.is_new == 'true'
+        id: check_kernel_new
         run: |
-          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
           LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
-          
-          if [ -f .external_image_tag ]; then
-            CURRENT_IMAGE_TAG=$(cat .external_image_tag)
-            echo "Current tracked image tag: $CURRENT_IMAGE_TAG"
-          else
-            CURRENT_IMAGE_TAG=""
-            echo "No existing image tag file found"
-          fi
           
           if [ -f .external_kernel_version ]; then
             CURRENT_KERNEL_VERSION=$(cat .external_kernel_version)
@@ -134,32 +141,32 @@ jobs:
           fi
 
       - name: Update image and kernel version files
-        if: steps.check_image_new.outputs.is_new == 'true'
+        if: steps.check_kernel_new.outputs.is_new == 'true'
         run: |
-          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
           LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
-          echo "$LATEST_IMAGE_TAG" > .external_image_tag
+          echo "$IMAGE_IDENTIFIER" > .external_image_tag
           echo "$LATEST_KERNEL_VERSION" > .external_kernel_version
 
       - name: Commit and push image updates
-        if: steps.check_image_new.outputs.is_new == 'true'
+        if: steps.check_kernel_new.outputs.is_new == 'true'
         run: |
           git add .external_image_tag .external_kernel_version
-          LATEST_IMAGE_TAG="${{ steps.get_image.outputs.latest_image_tag }}"
+          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
           LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
-          git commit -m "chore: update container image to $LATEST_IMAGE_TAG (kernel $LATEST_KERNEL_VERSION)" && \
+          git commit -m "chore: update container image (kernel $LATEST_KERNEL_VERSION)" && \
             git push
 
       - name: Trigger RPM build workflow (maccel update)
         if: steps.check_new.outputs.is_new == 'true'
         run: |
-          gh workflow run build-rpm.yml
+          gh workflow run build-rpm.yml -f update_specs=true -f build_akmod=true -f build_cli=true -f build_kmod=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trigger RPM build workflow (image update - kmod only)
-        if: steps.check_image_new.outputs.is_new == 'true'
+        if: steps.check_kernel_new.outputs.is_new == 'true'
         run: |
-          gh workflow run build-rpm.yml -f build_akmod=false -f build_cli=false -f build_kmod=true
+          gh workflow run build-rpm.yml -f update_specs=true -f build_akmod=false -f build_cli=false -f build_kmod=true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

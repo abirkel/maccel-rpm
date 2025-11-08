@@ -2,11 +2,13 @@
 name: Build and Publish RPM Packages
 
 'on':
-  push:
-    paths:
-      - '.external_release_tag'
   workflow_dispatch:
     inputs:
+      update_specs:
+        description: 'Update spec files with new version and release'
+        required: false
+        type: boolean
+        default: false
       force_rebuild:
         description: 'Force rebuild even if version unchanged'
         required: false
@@ -62,54 +64,88 @@ jobs:
           VERSION=$(cat .external_release_tag)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Load container config
-        id: config
-        run: |
-          source .github/workflows/config.env
-          echo "container_image=$CONTAINER_IMAGE" >> $GITHUB_ENV
-          echo "container_version=$CONTAINER_VERSION" >> $GITHUB_ENV
-
       - name: Capture build info
         id: build_info
         run: |
-          # Use inputs if provided, otherwise fall back to config.env
-          CONTAINER_IMAGE="${{ github.event.inputs.container_image }}"
-          CONTAINER_VERSION="${{ github.event.inputs.fedora_version }}"
+          set -euo pipefail
           
-          if [ -z "$CONTAINER_IMAGE" ]; then
-            CONTAINER_IMAGE="${{ env.container_image }}"
+          # Load defaults from config
+          source .github/workflows/config.env
+          
+          # Use workflow inputs if provided, otherwise use config defaults
+          CONTAINER_IMAGE="${{ github.event.inputs.container_image }:-$CONTAINER_IMAGE}"
+          CONTAINER_VERSION="${{ github.event.inputs.fedora_version }:-$CONTAINER_VERSION}"
+          
+          # Capture image digest using docker inspect
+          IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
+          CONTAINER_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" | cut -d'@' -f2 | cut -c1-12)
+          
+          if [ -z "$CONTAINER_DIGEST" ]; then
+            echo "ERROR: Failed to extract container digest from docker inspect"
+            docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL"
+            exit 1
           fi
-          if [ -z "$CONTAINER_VERSION" ]; then
-            CONTAINER_VERSION="${{ env.container_version }}"
+          
+          # Capture kernel version from container (not host)
+          KERNEL_VERSION=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
+          
+          if [ -z "$KERNEL_VERSION" ]; then
+            echo "ERROR: Failed to extract kernel version from kernel-devel package"
+            exit 1
           fi
-          
-          # Capture container digest
-          CONTAINER_DIGEST=$(cat /proc/self/cgroup | grep docker | sed 's/^.*\([0-9a-f]\{12\}\)[0-9a-f]*$/\1/' | head -1)
-          
-          # Capture kernel version
-          KERNEL_VERSION=$(uname -r)
           
           echo "container_image=${CONTAINER_IMAGE}:${CONTAINER_VERSION}" >> $GITHUB_OUTPUT
           echo "container_digest=${CONTAINER_DIGEST}" >> $GITHUB_OUTPUT
           echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Update spec files with new version
-        if: github.event_name == 'push'
+      - name: Update spec files with new version and release
+        if: github.event.inputs.update_specs == 'true'
         run: |
+          set -euo pipefail
           VERSION=${{ steps.version.outputs.version }}
           VERSION_NUM=${VERSION#v}
-          CHANGELOG_DATE=$(date "+%a %b %d %Y")
+          CHANGELOG_DATE=$(LC_ALL=C date "+%a %b %d %Y")
           MAINTAINER="github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
 
           for spec in specs/*.spec; do
+            if [ ! -f "$spec" ]; then
+              echo "ERROR: Spec file not found: $spec"
+              exit 1
+            fi
+            if ! grep -q "^Version:" "$spec"; then
+              echo "ERROR: Version field not found in $spec"
+              exit 1
+            fi
+            if ! grep -q "^Release:" "$spec"; then
+              echo "ERROR: Release field not found in $spec"
+              exit 1
+            fi
+
+            # Extract current version and release from spec file
+            CURRENT_VERSION=$(grep "^Version:" "$spec" | awk '{print $NF}')
+            CURRENT_RELEASE=$(grep "^Release:" "$spec" | awk '{print $NF}' | sed 's/%{?dist}//')
+
+            # Determine new release number
+            if [ "$CURRENT_VERSION" = "$VERSION_NUM" ]; then
+              # Same version, increment release
+              NEW_RELEASE=$((CURRENT_RELEASE + 1))
+              CHANGELOG_MSG="- Rebuild for kernel compatibility"
+            else
+              # New version, reset release to 1
+              NEW_RELEASE=1
+              CHANGELOG_MSG="- Update to maccel version ${VERSION_NUM}"
+            fi
+
             # Update Version field
             sed -i "s/^Version:.*/Version:        ${VERSION_NUM}/" "$spec"
 
-            # Generate changelog entry
-            CHANGELOG_ENTRY="* ${CHANGELOG_DATE} ${MAINTAINER} - ${VERSION_NUM}-1\n- Update to maccel version ${VERSION_NUM}"
+            # Update Release field
+            sed -i "s/^Release:.*/Release:        ${NEW_RELEASE}%{?dist}/" "$spec"
 
             # Insert changelog entry after %changelog line
-            sed -i "/^%changelog$/a ${CHANGELOG_ENTRY}" "$spec"
+            sed -i "/^%changelog$/a\\
+* ${CHANGELOG_DATE} ${MAINTAINER} - ${VERSION_NUM}-${NEW_RELEASE}\\
+${CHANGELOG_MSG}" "$spec"
           done
 
       - name: Install build dependencies
@@ -153,8 +189,8 @@ jobs:
           cd ~/rpmbuild/SPECS
           rpmbuild -ba kmod-maccel.spec
           
-          # Get kernel version
-          KVER=$(uname -r)
+          # Get kernel version from build info
+          KVER="${{ steps.build_info.outputs.kernel_version }}"
           
           # Rename kmod package to include kernel version
           cd ~/rpmbuild/RPMS/x86_64
@@ -193,30 +229,47 @@ jobs:
 
       - name: Prepare release packages
         run: |
+          set -euo pipefail
           mkdir -p release-packages
+          
           # Copy akmod packages if built
           if [ "${{ github.event.inputs.build_akmod }}" == "true" ]; then
-            cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm release-packages/ 2>/dev/null || true
+            if ls ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm 1>/dev/null 2>&1; then
+              cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm release-packages/
+            else
+              echo "ERROR: akmod package build was requested but no packages found"
+              exit 1
+            fi
           fi
+          
           # Copy CLI packages if built
           if [ "${{ github.event.inputs.build_cli }}" == "true" ]; then
-            cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/ 2>/dev/null || true
+            if ls ~/rpmbuild/RPMS/x86_64/maccel-*.rpm 1>/dev/null 2>&1; then
+              cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/
+            else
+              echo "ERROR: CLI package build was requested but no packages found"
+              exit 1
+            fi
           fi
+          
           # Copy kmod packages if built
           if [ "${{ github.event.inputs.build_kmod }}" == "true" ]; then
-            cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm release-packages/ 2>/dev/null || true
+            if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm 1>/dev/null 2>&1; then
+              cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm release-packages/
+            else
+              echo "ERROR: kmod package build was requested but no packages found"
+              exit 1
+            fi
           fi
+          
           # Exclude akmod-akmod-maccel and kmod-akmod-maccel (kmodtool stubs)
           rm -f release-packages/akmod-akmod-maccel-*.rpm
           rm -f release-packages/kmod-akmod-maccel-*.rpm
-          # Copy source RPMs if any packages were built
-          cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/ 2>/dev/null || true
           
-      - name: Create repository metadata
-        run: |
-          mkdir -p repo
-          cp release-packages/*.rpm repo/
-          createrepo_c repo/
+          # Copy source RPMs if any packages were built
+          if ls ~/rpmbuild/SRPMS/*.src.rpm 1>/dev/null 2>&1; then
+            cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -266,9 +319,9 @@ jobs:
           
           # Prepare repo directory with new packages
           mkdir -p repo
-          cp artifacts/repo/*.rpm repo/ 2>/dev/null || true
+          cp artifacts/release-packages/*.rpm repo/ 2>/dev/null || true
           
-          # Regenerate repository metadata to include all packages
+          # Generate repository metadata for new packages
           createrepo_c repo/
 
       - name: Deploy repo to GitHub Pages

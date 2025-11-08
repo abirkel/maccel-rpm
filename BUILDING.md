@@ -75,3 +75,37 @@ Before committing changes, lint the spec files:
 ```bash
 rpmlint specs/*.spec
 ```
+
+
+## GitHub Actions Secrets
+
+The automated build workflow requires the following secrets to be configured in your GitHub repository settings:
+
+### Required Secrets
+
+- **`GPG_PRIVATE_KEY`**: Base64-encoded GPG private key for signing RPM packages
+  - Generate with: `gpg --export-secret-key --armor <KEY_ID> | base64 -w0`
+  - Store the base64 output as this secret
+
+- **`GPG_PASSPHRASE`**: Passphrase for the GPG private key
+
+- **`GPG_KEY_ID`**: The GPG key ID used for signing (e.g., `1234567890ABCDEF`)
+
+### Setting Up Secrets
+
+1. Go to your repository on GitHub
+2. Navigate to **Settings** → **Secrets and variables** → **Actions**
+3. Click **New repository secret**
+4. Add each secret with the name and value listed above
+
+### Verifying Signed Packages
+
+Users can verify the authenticity of published packages using:
+
+```bash
+# Import the public key
+rpm --import https://raw.githubusercontent.com/<owner>/<repo>/main/RPM-GPG-KEY-maccel
+
+# Verify a package
+rpm -K ~/rpmbuild/RPMS/x86_64/maccel-*.rpm
+```
