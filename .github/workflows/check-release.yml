@@ -133,27 +133,22 @@ jobs:
           steps.check_image_new.outputs.is_new == 'true'
         id: check_kernel_new
         run: |
-          LATEST_KERNEL_VERSION="${{ \
-            steps.extract_kernel.outputs.kernel_version }}"
+          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
 
           if [ -f .external_kernel_version ]; then
             CURRENT_KERNEL_VERSION=$(cat .external_kernel_version)
-            echo "Current tracked kernel version: \
-              $CURRENT_KERNEL_VERSION"
+            echo "Current tracked kernel version: $CURRENT_KERNEL_VERSION"
           else
             CURRENT_KERNEL_VERSION=""
             echo "No existing kernel version file found"
           fi
 
-          if [ "$LATEST_KERNEL_VERSION" != \
-              "$CURRENT_KERNEL_VERSION" ]; then
+          if [ "$LATEST_KERNEL_VERSION" != "$CURRENT_KERNEL_VERSION" ]; then
             echo "is_new=true" >> "$GITHUB_OUTPUT"
-            echo "New kernel version detected: \
-              $LATEST_KERNEL_VERSION"
+            echo "New kernel version detected: $LATEST_KERNEL_VERSION"
           else
             echo "is_new=false" >> "$GITHUB_OUTPUT"
-            echo "No kernel version change (current: \
-              $CURRENT_KERNEL_VERSION)"
+            echo "No kernel version change (current: $CURRENT_KERNEL_VERSION)"
           fi
 
       - name: Update image and kernel version files
@@ -161,10 +156,8 @@ jobs:
           steps.config.outputs.enable_kmod == 'true' &&
           steps.check_kernel_new.outputs.is_new == 'true'
         run: |
-          IMAGE_IDENTIFIER="${{ \
-            steps.inspect_image.outputs.image_identifier }}"
-          LATEST_KERNEL_VERSION="${{ \
-            steps.extract_kernel.outputs.kernel_version }}"
+          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
+          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
           echo "$IMAGE_IDENTIFIER" > .external_image_tag
           echo "$LATEST_KERNEL_VERSION" > .external_kernel_version
 
@@ -174,12 +167,9 @@ jobs:
           steps.check_kernel_new.outputs.is_new == 'true'
         run: |
           git add .external_image_tag .external_kernel_version
-          IMAGE_IDENTIFIER="${{ \
-            steps.inspect_image.outputs.image_identifier }}"
-          LATEST_KERNEL_VERSION="${{ \
-            steps.extract_kernel.outputs.kernel_version }}"
-          git commit -m "chore: update container image \
-            (kernel $LATEST_KERNEL_VERSION)" && git push
+          IMAGE_IDENTIFIER="${{ steps.inspect_image.outputs.image_identifier }}"
+          LATEST_KERNEL_VERSION="${{ steps.extract_kernel.outputs.kernel_version }}"
+          git commit -m "chore: update container image (kernel $LATEST_KERNEL_VERSION)" && git push
 
       - name: Trigger RPM build workflow (maccel update)
         if: steps.check_new.outputs.is_new == 'true'

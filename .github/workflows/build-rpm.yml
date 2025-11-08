@@ -83,10 +83,8 @@ jobs:
           source .github/workflows/config.env
 
           # Use workflow inputs if provided, otherwise use defaults
-          CONTAINER_IMAGE="${{ github.event.inputs.container_image \
-            }:-$CONTAINER_IMAGE}"
-          CONTAINER_VERSION="${{ github.event.inputs.fedora_version \
-            }:-$CONTAINER_VERSION}"
+          CONTAINER_IMAGE="${{ github.event.inputs.container_image }}:-$CONTAINER_IMAGE"
+          CONTAINER_VERSION="${{ github.event.inputs.fedora_version }}:-$CONTAINER_VERSION"
 
           # Capture image digest using docker inspect
           IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
@@ -122,8 +120,7 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
           VERSION_NUM=${VERSION#v}
           CHANGELOG_DATE=$(LC_ALL=C date "+%a %b %d %Y")
-          MAINTAINER="github-actions[bot] \
-            <github-actions[bot]@users.noreply.github.com>"
+          MAINTAINER="github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
 
           for spec in specs/*.spec; do
             if [ ! -f "$spec" ]; then
@@ -363,7 +360,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Create release with packages
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ needs.build-rpm.outputs.version }}
           files: artifacts/release-packages/*
