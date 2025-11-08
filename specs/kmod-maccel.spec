@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 
 Name:           kmod-maccel
-Version:        0.5.5
+Version:        0.5.6
 Release:        1%{?dist}
 Summary:        Kernel module for maccel mouse acceleration driver
 License:        GPL-2.0-or-later
@@ -62,6 +62,8 @@ fi
 /lib/modules/*/extra/maccel/maccel.ko
 
 %changelog
+* Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
+- Update to maccel version 0.5.6
 * Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.5-1
 - Update to maccel version 0.5.5
 * Fri Nov 07 2025 Maccel Builder <builder@maccel.local> - 0.5.6-1
