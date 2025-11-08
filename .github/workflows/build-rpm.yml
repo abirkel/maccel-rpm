@@ -85,8 +85,8 @@ jobs:
       image: ${{ needs.load-config.outputs.container_image }}:${{ needs.load-config.outputs.container_version }}
     outputs:
       version: ${{ steps.version.outputs.version }}
-      container_image: ${{ steps.build_info.outputs.container_image }}
-      container_digest: ${{ steps.build_info.outputs.container_digest }}
+      container_image: ${{ needs.load-config.outputs.container_image }}
+      container_version: ${{ needs.load-config.outputs.container_version }}
       kernel_version: ${{ steps.build_info.outputs.kernel_version }}
     steps:
       - name: Checkout repository
@@ -108,27 +108,10 @@ jobs:
             echo "Using version from .external_versions: $MACCEL_VERSION"
           fi
 
-      - name: Capture build info
+      - name: Detect kernel version
         id: build_info
         run: |
           set -euo pipefail
-
-          # Use the container image/version from load-config job
-          CONTAINER_IMAGE="${{ needs.load-config.outputs.container_image }}"
-          CONTAINER_VERSION="${{ needs.load-config.outputs.container_version }}"
-
-          # Capture image digest using docker inspect
-          IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
-          CONTAINER_DIGEST=$(docker inspect \
-            --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" | \
-            cut -d'@' -f2 | cut -c1-12)
-
-          if [ -z "$CONTAINER_DIGEST" ]; then
-            echo "ERROR: Failed to extract container digest"
-            docker inspect --format='{{index .RepoDigests 0}}' \
-              "$IMAGE_FULL"
-            exit 1
-          fi
 
           # Capture kernel version from container (not host)
           KERNEL_VERSION=$(rpm -q kernel-devel \
@@ -139,10 +122,8 @@ jobs:
             exit 1
           fi
 
-          echo "container_image=${CONTAINER_IMAGE}:${CONTAINER_VERSION}" \
-            >> $GITHUB_OUTPUT
-          echo "container_digest=${CONTAINER_DIGEST}" >> $GITHUB_OUTPUT
           echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
+          echo "Detected kernel version: ${KERNEL_VERSION}"
 
       - name: Update spec files with new version and release
         if: github.event.inputs.update_specs == 'true'
@@ -353,6 +334,30 @@ jobs:
           name: rpm-packages
           path: artifacts/
 
+      - name: Capture container digest
+        id: digest
+        run: |
+          CONTAINER_IMAGE="${{ needs.build-rpm.outputs.container_image }}"
+          CONTAINER_VERSION="${{ needs.build-rpm.outputs.container_version }}"
+          IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
+
+          # Pull image to ensure we have it locally
+          docker pull "${IMAGE_FULL}"
+
+          # Extract digest
+          CONTAINER_DIGEST=$(docker inspect \
+            --format='{{index .RepoDigests 0}}' "${IMAGE_FULL}" | \
+            cut -d'@' -f2 | cut -c1-12)
+
+          if [ -z "$CONTAINER_DIGEST" ]; then
+            echo "ERROR: Failed to extract container digest"
+            docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE_FULL}"
+            exit 1
+          fi
+
+          echo "digest=${CONTAINER_DIGEST}" >> $GITHUB_OUTPUT
+          echo "Container digest: ${CONTAINER_DIGEST}"
+
       - name: Prepare release notes
         id: release_notes
         run: |
@@ -360,7 +365,8 @@ jobs:
 
           VER="${{ needs.build-rpm.outputs.version }}"
           IMG="${{ needs.build-rpm.outputs.container_image }}"
-          DIG="${{ needs.build-rpm.outputs.container_digest }}"
+          CONTAINER_VERSION="${{ needs.build-rpm.outputs.container_version }}"
+          DIG="${{ steps.digest.outputs.digest }}"
           KVER="${{ needs.build-rpm.outputs.kernel_version }}"
           REPO="${{ github.repository }}"
 
@@ -369,7 +375,7 @@ jobs:
             echo "RPM packages for maccel **$VER**"
             echo ""
             echo "## Build Information"
-            echo "- **Container Image:** \`$IMG\`"
+            echo "- **Container Image:** \`${IMG}:${CONTAINER_VERSION}\`"
             echo "- **Container Digest:** \`$DIG\`"
             echo "- **Kernel Version:** \`$KVER\`"
 
