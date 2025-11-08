@@ -423,7 +423,9 @@ jobs:
 
           # Prepare repo with existing + new packages
           mkdir -p repo
-          cp -r gh-pages-repo/* repo/ 2>/dev/null || true
+          # Copy only RPM files from existing repo (not directories/metadata)
+          find gh-pages-repo -maxdepth 1 -name "*.rpm" \
+            -exec cp {} repo/ \; 2>/dev/null || true
           cp artifacts/release-packages/*.rpm repo/ 2>/dev/null || true
 
           # Regenerate metadata for ALL packages
