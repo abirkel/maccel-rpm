@@ -102,10 +102,14 @@ jobs:
           if [ -n "$INPUT_VERSION" ]; then
             echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
             echo "Using version from workflow input: $INPUT_VERSION"
-          else
+          elif [ -f .external_versions ]; then
             source .external_versions
             echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
             echo "Using version from .external_versions: $MACCEL_VERSION"
+          else
+            echo "ERROR: No version specified and .external_versions not found"
+            echo "Please provide maccel_version input or ensure .external_versions exists"
+            exit 1
           fi
 
       - name: Detect kernel version
