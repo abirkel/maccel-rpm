@@ -182,11 +182,19 @@ jobs:
       container_image: ${{ needs.load-config.outputs.container_image }}
       container_version: ${{ needs.load-config.outputs.container_version }}
       kernel_version: ${{ steps.build_info.outputs.kernel_version }}
+      version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ needs.update-specs.outputs.commit_sha || github.ref_name }}
+
+      - name: Get version from spec
+        id: get_version
+        run: |
+          VERSION=$(grep "^Version:" specs/maccel.spec | awk '{print $NF}')
+          echo "version=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "Detected version from spec: v${VERSION}"
 
       - name: Detect kernel version
         id: build_info
@@ -350,13 +358,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get version from spec
-        id: version
-        run: |
-          VERSION=$(grep "^Version:" specs/maccel.spec | awk '{print $NF}')
-          echo "version=v${VERSION}" >> $GITHUB_OUTPUT
-          echo "Detected version from spec: v${VERSION}"
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -391,7 +392,7 @@ jobs:
         run: |
           source build.conf
 
-          VER="${{ steps.version.outputs.version }}"
+          VER="${{ needs.build-rpm.outputs.version }}"
           IMG="${{ needs.build-rpm.outputs.container_image }}"
           BUILD_TAG="${{ steps.container_info.outputs.build_tag }}"
           KVER="${{ needs.build-rpm.outputs.kernel_version }}"
@@ -426,7 +427,7 @@ jobs:
       - name: Create release with packages
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ steps.version.outputs.version }}
+          tag_name: build-${{ needs.build-rpm.outputs.version }}
           files: artifacts/release-packages/*
           body: ${{ steps.release_notes.outputs.notes }}
 
