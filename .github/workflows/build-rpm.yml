@@ -122,7 +122,8 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
           VERSION_NUM=${VERSION#v}
           CHANGELOG_DATE=$(LC_ALL=C date "+%a %b %d %Y")
-          MAINTAINER="github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          MAINTAINER="github-actions[bot] \
+            <github-actions[bot]@users.noreply.github.com>"
 
           for spec in specs/*.spec; do
             if [ ! -f "$spec" ]; then
