@@ -17,18 +17,6 @@ BuildRequires:  kmodtool
 # kmodtool does its magic here - generates the akmod package structure
 %{expand:%(kmodtool --target %{_target_cpu} --kmodname %{kmod_name} --akmod 2>/dev/null) }
 
-# Provide the -common package (no shared files needed for maccel)
-%package -n %{pkg_kmod_name}-common
-Summary: Common files for %{kmod_name} kernel module
-Provides: %{pkg_kmod_name}-common = %{version}-%{release}
-
-%description -n %{pkg_kmod_name}-common
-This package provides common files for the %{kmod_name} kernel module.
-Currently, there are no shared files, so this package is empty.
-
-%files -n %{pkg_kmod_name}-common
-# No files - this is an empty package to satisfy kmodtool dependencies
-
 %description
 This package provides the akmod package for the maccel mouse acceleration driver.
 The akmod system automatically rebuilds the kernel module when the kernel is updated,
