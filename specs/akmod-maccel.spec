@@ -1,14 +1,7 @@
-# akmod-maccel.spec - Automatic kernel module package for maccel mouse acceleration driver
-# This spec file builds an akmod package that automatically rebuilds the kernel module
-# when the kernel is updated, using Fedora's akmods system.
-#
-# rpmlint validation: Passed with 2 acceptable warnings
-# - no-buildroot-tag: BuildRoot is automatically managed in modern RPM
-# - no-%check-section: No tests needed for source-only akmod package
-
+# Build only the akmod package and no kernel module packages:
+%define buildforkernels akmod
 %global debug_package %{nil}
 %global kmod_name maccel
-%global kver %{?kernel_version}%{!?kernel_version:0}
 
 Name:           akmod-maccel
 Version:        0.5.6
@@ -18,12 +11,10 @@ License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
 Source0:        %{url}/archive/v%{version}/maccel-%{version}.tar.gz
 
-BuildRequires:  akmods
-BuildRequires:  %{_bindir}/kmodtool
+BuildRequires:  kmodtool
 
-Requires:       akmods
-Requires:       kernel-devel
-Provides:       kmod-maccel = %{version}-%{release}
+# kmodtool does its magic here - generates the akmod package structure
+%{expand:%(kmodtool --target %{_target_cpu} --kmodname %{name} --akmod 2>/dev/null) }
 
 %description
 This package provides the akmod package for the maccel mouse acceleration driver.
@@ -34,37 +25,41 @@ Maccel is a mouse acceleration driver for Linux that provides customizable mouse
 acceleration curves and parameters through a kernel module and CLI tool.
 
 %prep
-%autosetup -n %{kmod_name}-%{version}
+# Error out if there was something wrong with kmodtool:
 %{?kmodtool_check}
+# Print kmodtool output for debugging purposes:
+kmodtool --target %{_target_cpu} --kmodname %{name} --akmod 2>/dev/null
+
+%autosetup -n %{kmod_name}-%{version}
+
+# Prepare build directories for each kernel version
+for kernel_version in %{?kernel_versions} ; do
+  mkdir -p _kmod_build_${kernel_version%%___*}
+  cp -a driver/* Makefile _kmod_build_${kernel_version%%___*}/
+done
 
 %build
-# Generate the KMOD spec for the kernel module build
-# Get the kernel version from installed kernel-devel package
-KVER=$(rpm -q kernel-devel --queryformat '%%{VERSION}-%%{RELEASE}.%%{ARCH}\n' | head -1)
-kmodtool \
-  --kmodname %{kmod_name} \
-  --target %{_target_cpu} \
-  --repo free \
-  --for-kernels "$KVER" \
-  --noakmod > kmod-%{kmod_name}.spec
+# Build kernel modules for each kernel version
+for kernel_version in %{?kernel_versions} ; do
+  make V=1 %{?_smp_mflags} -C ${kernel_version##*___} M=${PWD}/_kmod_build_${kernel_version%%___*} modules
+done
 
 %install
-# Install driver source to /usr/src/akmods/ for automatic building
-mkdir -p %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}
-cp -r driver %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
-cp -r Makefile %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
-cp kmod-%{kmod_name}.spec %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
+# Install kernel modules for each kernel version
+for kernel_version in %{?kernel_versions}; do
+  mkdir -p %{buildroot}%{kmodinstdir_prefix}/${kernel_version%%___*}/%{kmodinstdir_postfix}/
+  install -D -m 755 _kmod_build_${kernel_version%%___*}/%{kmod_name}.ko \
+    %{buildroot}%{kmodinstdir_prefix}/${kernel_version%%___*}/%{kmodinstdir_postfix}/
+  chmod a+x %{buildroot}%{kmodinstdir_prefix}/${kernel_version%%___*}/%{kmodinstdir_postfix}/%{kmod_name}.ko
+done
 
-%files
-%license LICENSE
-%doc README.md
-%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
+# Install akmod source (kmodtool handles this via %akmod_install macro)
+%{?akmod_install}
 
 %changelog
-* Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.5-1
-- Update to maccel version 0.5.5
-* Fri Nov 07 2025 Maccel Builder <builder@maccel.local> - 0.5.6-1
+* Tue Nov 19 2024 Maccel Builder <builder@maccel.local> - 0.5.6-1
 - Initial akmod package for maccel
-- Use proper akmod pattern without kmodtool complexity
-- Remove fabricated /etc/akmods config file
-- Use upstream driver Makefile directly
+- Refactor to use proper kmodtool --akmod pattern following ublue-os standards
+
+* Fri Nov 08 2024 github-actions[bot] <github-actions[bot]@users.noreply.github.com> - 0.5.5-1
+- Update to maccel version 0.5.5
