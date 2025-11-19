@@ -39,8 +39,8 @@ acceleration curves and parameters through a kernel module and CLI tool.
 
 %build
 # Generate the KMOD spec for the kernel module build
-# Get the kernel version from installed kernel-devel and use --for-kernels
-KVER=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
+# Get the kernel version from installed kernel-devel package
+KVER=$(rpm -q kernel-devel --queryformat '%%{VERSION}-%%{RELEASE}.%%{ARCH}\n' | head -1)
 kmodtool \
   --kmodname %{kmod_name} \
   --target %{_target_cpu} \
