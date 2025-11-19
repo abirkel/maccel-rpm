@@ -3,6 +3,8 @@
 # when the kernel is updated, using Fedora's akmods system.
 
 %global debug_package %{nil}
+%global kmod_name maccel
+%global kver %{?kernel_version}%{!?kernel_version:0}
 
 Name:           akmod-maccel
 Version:        0.5.6
@@ -13,9 +15,11 @@ URL:            https://github.com/Gnarus-G/maccel
 Source0:        %{url}/archive/v%{version}/maccel-%{version}.tar.gz
 
 BuildRequires:  akmods
+BuildRequires:  %{_bindir}/kmodtool
 
 Requires:       akmods
 Requires:       kernel-devel
+Provides:       kmod-maccel = %{version}-%{release}
 
 %description
 This package provides the akmod package for the maccel mouse acceleration driver.
@@ -26,31 +30,24 @@ Maccel is a mouse acceleration driver for Linux that provides customizable mouse
 acceleration curves and parameters through a kernel module and CLI tool.
 
 %prep
-%setup -q -n maccel-%{version}
+%autosetup -n %{kmod_name}-%{version}
+%{?kmodtool_check}
 
 %build
-# Prepare source files only - akmods will compile on target system
-# No build needed for akmod packages
+# Generate kmod spec using kmodtool
+kmodtool --kmodname %{kmod_name} --target %{_target_cpu} --akmod > kmod-%{kmod_name}.spec
 
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
-mkdir -p %{buildroot}%{_usrsrc}/akmods/maccel-%{version}
-cp -r driver/* %{buildroot}%{_usrsrc}/akmods/maccel-%{version}/
-
-%post
-# Trigger akmod build for current kernel
-/usr/sbin/akmods --force --kernels $(uname -r) || true
-/usr/sbin/depmod -a || true
-/sbin/modprobe maccel || true
-
-%preun
-# Unload module before uninstall
-/sbin/modprobe -r maccel 2>/dev/null || true
+mkdir -p %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}
+cp -r driver %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
+cp -r Makefile %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
+cp kmod-%{kmod_name}.spec %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
 
 %files
 %license LICENSE
 %doc README.md
-%{_usrsrc}/akmods/maccel-%{version}/
+%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
 
 %changelog
 * Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
