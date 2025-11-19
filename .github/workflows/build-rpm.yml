@@ -46,6 +46,11 @@ name: Build and Publish RPM Packages
         required: false
         type: string
         default: ''
+      kernel_version:
+        description: 'Kernel version to build for (leave empty to auto-detect)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -201,26 +206,43 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Capture kernel version from container (not host)
-          KERNEL_VERSION=$(rpm -q kernel-devel \
-            --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
-
-          if [ -z "$KERNEL_VERSION" ]; then
-            echo "ERROR: Failed to extract kernel version"
-            exit 1
+          # Use workflow input if provided, otherwise auto-detect
+          INPUT_KERNEL_VERSION="${{ github.event.inputs.kernel_version }}"
+          
+          if [ -n "$INPUT_KERNEL_VERSION" ]; then
+            KERNEL_VERSION="$INPUT_KERNEL_VERSION"
+            echo "Using kernel version from workflow input: ${KERNEL_VERSION}"
+          else
+            # Auto-detect kernel version from container
+            KERNEL_VERSION=$(rpm -q kernel-devel \
+              --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
+            
+            if [ -z "$KERNEL_VERSION" ]; then
+              echo "ERROR: Failed to extract kernel version"
+              exit 1
+            fi
+            
+            echo "Auto-detected kernel version: ${KERNEL_VERSION}"
           fi
 
           echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
-          echo "Detected kernel version: ${KERNEL_VERSION}"
 
       - name: Install build dependencies
         run: |
           # Step 1: Install base RPM build tools
           dnf install -y rpm-build rpmdevtools rpmlint createrepo_c \
-            rpm-sign gnupg2 pinentry spectool
+            rpm-sign gnupg2 pinentry spectool kmodtool
 
           # Step 2: Install BuildRequires from spec files
           dnf builddep -y specs/*.spec
+
+      - name: Verify kmodtool availability
+        run: |
+          if ! command -v kmodtool &> /dev/null; then
+            echo "ERROR: kmodtool not found in PATH"
+            exit 1
+          fi
+          echo "kmodtool is available at: $(which kmodtool)"
 
       - name: Setup RPM build tree
         run: rpmdev-setuptree
@@ -239,7 +261,8 @@ jobs:
         if: github.event.inputs.build_akmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
-          rpmbuild -ba akmod-maccel.spec
+          KERNEL_VERSION="${{ steps.build_info.outputs.kernel_version }}"
+          rpmbuild --define "kernel_version ${KERNEL_VERSION}" -ba akmod-maccel.spec
 
       - name: Build maccel CLI
         if: github.event.inputs.build_cli == 'true'
@@ -252,24 +275,27 @@ jobs:
           github.event.inputs.build_kmod == 'true' &&
           needs.load-config.outputs.enable_kmod == 'true'
         run: |
+          set -euo pipefail
+          
+          # Locate generated kmod spec from akmod build
+          GENERATED_SPEC=$(find ~/rpmbuild/BUILD/maccel-* -name "kmod-maccel.spec" -type f 2>/dev/null | head -1)
+          
+          if [ -z "$GENERATED_SPEC" ]; then
+            echo "ERROR: Generated kmod spec not found in ~/rpmbuild/BUILD/maccel-*/"
+            echo "Available files in BUILD directory:"
+            ls -la ~/rpmbuild/BUILD/ || true
+            exit 1
+          fi
+          
+          echo "Found generated kmod spec at: $GENERATED_SPEC"
+          
+          # Copy generated spec to SPECS directory
+          cp "$GENERATED_SPEC" ~/rpmbuild/SPECS/
+          
+          # Build kmod package with kernel version
           cd ~/rpmbuild/SPECS
-          rpmbuild -ba kmod-maccel.spec
-
-          # Get kernel version from build info
-          KVER="${{ steps.build_info.outputs.kernel_version }}"
-
-          # Rename kmod package to include kernel version
-          cd ~/rpmbuild/RPMS/x86_64
-          for rpm in kmod-maccel-*.rpm; do
-            if [[ "$rpm" != *"+"* ]]; then
-              # Extract version and release from filename
-              # kmod-maccel-0.5.6-1.fc41.x86_64.rpm ->
-              # kmod-maccel-0.5.6-1+6.12.1.fc41.x86_64.rpm
-              NEW_NAME=$(echo "$rpm" | \
-                sed "s/\.fc[0-9]*\.x86_64\.rpm/+${KVER}.x86_64.rpm/")
-              mv "$rpm" "$NEW_NAME"
-            fi
-          done
+          KERNEL_VERSION="${{ steps.build_info.outputs.kernel_version }}"
+          rpmbuild --define "kernels ${KERNEL_VERSION}" -ba kmod-maccel.spec
 
       - name: Lint packages
         run: |
