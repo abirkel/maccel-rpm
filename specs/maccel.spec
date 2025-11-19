@@ -43,8 +43,8 @@ cargo build --bin maccel --release
 # Install maccel binary
 install -D -m 0755 target/release/maccel %{buildroot}%{_bindir}/maccel
 
-# Install udev rules
-install -D -m 0644 udev_rules/99-maccel.rules %{buildroot}%{_udevrulesdir}/99-maccel.rules
+# Install udev rules (use /usr/lib/udev/rules.d for Fedora)
+install -D -m 0644 udev_rules/99-maccel.rules %{buildroot}%{_prefix}/lib/udev/rules.d/99-maccel.rules
 
 # Install udev helper script (use _prefix/lib for udev helpers on Fedora)
 install -D -m 0755 udev_rules/maccel_param_ownership_and_resets %{buildroot}%{_prefix}/lib/udev/maccel_param_ownership_and_resets
@@ -73,8 +73,8 @@ fi
 %license LICENSE
 %doc README.md
 %{_bindir}/maccel
-%{_udevrulesdir}/99-maccel.rules
-# Note: Using _prefix/lib/udev is correct for Fedora udev helper scripts
+# Note: Using _prefix/lib/udev is correct for Fedora udev rules and helper scripts
+%{_prefix}/lib/udev/rules.d/99-maccel.rules
 %{_prefix}/lib/udev/maccel_param_ownership_and_resets
 
 %changelog
