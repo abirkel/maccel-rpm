@@ -71,6 +71,14 @@ gh workflow run build-rpm.yml \
   -f fedora_version=40
 ```
 
+**Build for Specific Kernel Version**
+```bash
+gh workflow run build-rpm.yml \
+  -f kernel_version=6.11.5-300.fc41.x86_64 \
+  -f build_akmod=true \
+  -f build_kmod=true
+```
+
 ## Build Configuration
 
 Edit `build.conf` to customize the default container image:
@@ -100,6 +108,7 @@ The `build-rpm.yml` workflow accepts these inputs:
 - `build_akmod` (boolean, default: true) - Build akmod package
 - `build_cli` (boolean, default: true) - Build CLI package
 - `build_kmod` (boolean, default: false) - Build kmod package
+- `kernel_version` (string, optional) - Specific kernel version to build for (e.g., 6.11.5-300.fc41.x86_64). If not provided, auto-detects from container
 - `container_image` (string, optional) - Container image to use (overrides build.conf default)
 - `fedora_version` (string, optional) - Container version tag (overrides build.conf default)
 
@@ -115,3 +124,52 @@ The `build-rpm.yml` workflow accepts these inputs:
 - **New version**: Sets `Version:` to new value, resets `Release:` to 1, adds changelog entry
 - **Same version**: Keeps `Version:` unchanged, increments `Release:` number, adds rebuild changelog entry
 - **Automatic rollback**: If build fails after updating specs, the commit is automatically reverted
+
+## Generated kmod Spec Workflow
+
+The build workflow uses kmodtool to generate kmod spec files dynamically, following RPMFusion standards:
+
+### How It Works
+
+1. **akmod Build Phase**:
+   - The akmod spec invokes kmodtool during the %build section
+   - kmodtool generates a proper kmod spec with kernel-specific subpackages
+   - Generated spec includes weak modules support and ABI tracking
+   - The generated spec is packaged into the akmod for use by akmods
+
+2. **kmod Build Phase** (when `build_kmod: true`):
+   - Workflow locates the generated kmod spec from akmod build output
+   - Searches in `~/rpmbuild/BUILD/maccel-*/kmod-maccel.spec`
+   - Copies generated spec to `~/rpmbuild/SPECS/`
+   - Builds kmod using: `rpmbuild --define "kernels $KVER" -ba kmod-maccel.spec`
+
+3. **Kernel Version Handling**:
+   - For akmod builds: passes `--define "kernel_version $KVER"` to rpmbuild
+   - For kmod builds: passes `--define "kernels $KVER"` to rpmbuild
+   - Auto-detects kernel version from container if not explicitly provided
+   - Uses kernel-devel package version from the container image
+
+### Why Generated Specs?
+
+The kmodtool-generated specs provide:
+- **Proper subpackaging**: Creates per-kernel packages (kmod-maccel-6.11.5-300.fc41.x86_64)
+- **Meta-package**: Creates kmod-maccel that depends on latest kernel-specific package
+- **Weak modules support**: Allows modules to work across minor kernel updates
+- **ABI tracking**: Ensures module compatibility with kernel ABI
+- **RPMFusion compatibility**: Follows standard packaging methodology
+
+### Troubleshooting Generated Specs
+
+**Generated spec not found**:
+```bash
+# Workflow will fail with clear error message
+# Check that akmod build completed successfully
+# Verify kmodtool is installed in the container
+```
+
+**kmod build fails**:
+```bash
+# Ensure kernel_version matches available kernel-devel
+# Check that kernel-devel is installed in container
+# Verify generated spec syntax with rpmlint
+```
