@@ -18,6 +18,7 @@ BuildRequires:  make
 
 Requires:       (akmod-maccel or kmod-maccel)
 Requires:       systemd-udev
+Provides:       maccel-kmod-common = %{version}-%{release}
 
 %description
 Command-line interface for configuring the maccel mouse acceleration driver.
