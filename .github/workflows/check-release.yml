@@ -164,12 +164,22 @@ jobs:
           fi
 
           MACCEL_VERSION="${{ steps.get_release.outputs.latest_tag }}"
+          KERNEL_VERSION="${{ steps.check_kernel.outputs.kernel_version }}"
 
-          gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
+          # Build base command
+          CMD="gh workflow run build-rpm.yml --ref ${{ github.ref_name }} \
             -f maccel_version=$MACCEL_VERSION \
             -f update_specs=true \
             -f build_akmod=$BUILD_AKMOD \
             -f build_cli=$BUILD_CLI \
-            -f build_kmod=$BUILD_KMOD
+            -f build_kmod=$BUILD_KMOD"
+
+          # Add kernel_version parameter only if it was detected
+          if [ -n "$KERNEL_VERSION" ]; then
+            CMD="$CMD -f kernel_version=$KERNEL_VERSION"
+          fi
+
+          # Execute the command
+          eval $CMD
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
