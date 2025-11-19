@@ -43,8 +43,7 @@ acceleration curves and parameters through a kernel module and CLI tool.
 kmodtool \
   --kmodname %{kmod_name} \
   --target %{_target_cpu} \
-  --repo local \
-  --kmod-spec > kmod-%{kmod_name}.spec
+  --repo local > kmod-%{kmod_name}.spec
 
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
