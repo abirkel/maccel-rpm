@@ -222,13 +222,17 @@ jobs:
         if: github.event.inputs.build_akmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
-          rpmbuild -ba maccel-kmod.spec
+          VERSION=$(grep "^Version:" maccel-kmod.spec | awk '{print $NF}')
+          RELEASE=$(grep "^Release:" maccel-kmod.spec | awk '{print $NF}' | sed 's/%{?dist}//')
+          rpmbuild --define "version ${VERSION}" --define "release ${RELEASE}" -ba maccel-kmod.spec
 
       - name: Build maccel CLI
         if: github.event.inputs.build_cli == 'true'
         run: |
           cd ~/rpmbuild/SPECS
-          rpmbuild -ba maccel.spec
+          VERSION=$(grep "^Version:" maccel.spec | awk '{print $NF}')
+          RELEASE=$(grep "^Release:" maccel.spec | awk '{print $NF}' | sed 's/%{?dist}//')
+          rpmbuild --define "version ${VERSION}" --define "release ${RELEASE}" -ba maccel.spec
 
       - name: Lint packages
         run: |
