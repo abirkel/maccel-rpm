@@ -14,7 +14,7 @@ Source0:        %{url}/archive/v%{version}/maccel-%{version}.tar.gz
 BuildRequires:  kmodtool
 
 # kmodtool does its magic here - generates the akmod package structure
-%{expand:%(kmodtool --target %{_target_cpu} --kmodname %{name} --akmod 2>/dev/null) }
+%{expand:%(kmodtool --target %{_target_cpu} --kmodname %{kmod_name} --akmod 2>/dev/null) }
 
 %description
 This package provides the akmod package for the maccel mouse acceleration driver.
@@ -28,7 +28,7 @@ acceleration curves and parameters through a kernel module and CLI tool.
 # Error out if there was something wrong with kmodtool:
 %{?kmodtool_check}
 # Print kmodtool output for debugging purposes:
-kmodtool --target %{_target_cpu} --kmodname %{name} --akmod 2>/dev/null
+kmodtool --target %{_target_cpu} --kmodname %{kmod_name} --akmod 2>/dev/null
 
 %autosetup -n %{kmod_name}-%{version}
 
