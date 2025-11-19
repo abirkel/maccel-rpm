@@ -38,13 +38,18 @@ acceleration curves and parameters through a kernel module and CLI tool.
 %{?kmodtool_check}
 
 %build
-# No build step needed - akmod packages the source for later building
+# Generate the KMOD spec for the kernel module build
+# This spec is designed to be read and executed by the akmods service.
+kmodtool \
+  --kmodname %{kmod_name} \
+  --target %{_target_cpu} > kmod-%{kmod_name}.spec
 
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
 mkdir -p %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}
 cp -r driver %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
 cp -r Makefile %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
+cp kmod-%{kmod_name}.spec %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
 
 %files
 %license LICENSE
