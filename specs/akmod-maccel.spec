@@ -39,10 +39,11 @@ acceleration curves and parameters through a kernel module and CLI tool.
 
 %build
 # Generate the KMOD spec for the kernel module build
-# Use --noakmod to generate a standalone kmod spec without akmod wrapper
+# Use --repo rpmfusion as the standard repo for akmods
 kmodtool \
   --kmodname %{kmod_name} \
   --target %{_target_cpu} \
+  --repo rpmfusion \
   --noakmod > kmod-%{kmod_name}.spec
 
 %install
