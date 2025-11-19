@@ -42,8 +42,7 @@ acceleration curves and parameters through a kernel module and CLI tool.
 # This spec is designed to be read and executed by the akmods service.
 kmodtool \
   --kmodname %{kmod_name} \
-  --target %{_target_cpu} \
-  --repo local > kmod-%{kmod_name}.spec
+  --target %{_target_cpu} > kmod-%{kmod_name}.spec
 
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
