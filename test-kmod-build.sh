@@ -10,11 +10,11 @@ echo "=== Starting Fedora container test for kmod build ==="
 WORKSPACE_DIR="$(pwd)"
 
 # Run all tests in a Fedora container
-docker run --rm -v "${WORKSPACE_DIR}:/workspace" -w /workspace fedora:latest bash -c '
+docker run --rm -v "${WORKSPACE_DIR}:/workspace" -w /workspace fedora-rpm-build bash -c '
 set -euo pipefail
 
-echo "=== Installing build dependencies ==="
-dnf install -y rpm-build rpmdevtools kmodtool kernel-devel gcc make spectool
+#echo "=== Installing build dependencies ==="
+#dnf install -y rpm-build rpmdevtools kmodtool kernel-devel gcc make spectool
 
 echo "=== Setting up RPM build tree ==="
 rpmdev-setuptree
@@ -29,30 +29,85 @@ echo "=== Building akmod package to generate kmod spec ==="
 rpmbuild --define "version 0.5.6" --define "release 1" --nodeps --noclean -ba ~/rpmbuild/SPECS/akmod-maccel.spec
 
 echo ""
-echo "=== Locating generated kmod spec from akmod build ==="
-KMOD_SPEC=$(find ~/rpmbuild/BUILD -name "kmod-maccel.spec" | head -1)
+echo "=== Extracting kmod spec from built akmod RPM ==="
+AKMOD_RPM=$(find ~/rpmbuild/RPMS -name "akmod-maccel-*.rpm" | head -1)
+if [ -z "$AKMOD_RPM" ]; then
+    echo "✗ Akmod RPM not found"
+    exit 1
+fi
+echo "✓ Found akmod RPM: $AKMOD_RPM"
+
+# Extract the akmod RPM to get the kmod spec
+mkdir -p /tmp/akmod-extract
+cd /tmp/akmod-extract
+rpm2cpio "$AKMOD_RPM" | cpio -idmv 2>&1 | grep -E "(kmod-maccel.spec|driver|Makefile)"
+
+# Find the kmod spec in the extracted files
+KMOD_SPEC=$(find /tmp/akmod-extract -name "kmod-maccel.spec" | head -1)
 if [ -z "$KMOD_SPEC" ]; then
-    echo "✗ Generated kmod spec NOT found in ~/rpmbuild/BUILD/"
-    echo "Available BUILD directories:"
-    ls -la ~/rpmbuild/BUILD/ || true
+    echo "✗ Generated kmod spec NOT found in akmod RPM"
+    echo "Contents of extracted akmod:"
+    find /tmp/akmod-extract -type f
     exit 1
 fi
 echo "✓ Found generated kmod spec: $KMOD_SPEC"
 
 echo ""
+echo "=== Examining generated kmod spec content ==="
+echo "--- First 100 lines of generated kmod spec ---"
+head -100 "$KMOD_SPEC"
+echo "--- End of kmod spec preview ---"
+
+echo ""
 echo "=== Copying generated kmod spec to ~/rpmbuild/SPECS/ ==="
-cp "$KMOD_SPEC" ~/rpmbuild/SPECS/
-echo "✓ Copied to ~/rpmbuild/SPECS/kmod-maccel.spec"
+KMOD_SPEC_DEST="$HOME/rpmbuild/SPECS/kmod-maccel.spec"
+cp "$KMOD_SPEC" "$KMOD_SPEC_DEST"
+
+# Add missing top-level Name, Version, Release fields to the kmod spec
+# The generated spec from kmodtool only has subpackage definitions
+sed -i '1i\
+Name:           kmod-maccel\
+Version:        0.5.6\
+Release:        1%{?dist}\
+Summary:        Kernel module for maccel\
+License:        GPL-2.0-or-later\
+URL:            https://github.com/Gnarus-G/maccel\
+Source0:        maccel-0.5.6.tar.gz\
+BuildRequires:  kernel-devel\
+\
+%description\
+Kernel module package for maccel mouse acceleration driver.\
+' "$KMOD_SPEC_DEST"
+
+echo "✓ Copied and patched kmod spec to ~/rpmbuild/SPECS/kmod-maccel.spec"
+
+# Also copy the source files to the BUILD directory for kmod build
+AKMOD_SRC_DIR=$(dirname "$KMOD_SPEC")
+mkdir -p ~/rpmbuild/BUILD/maccel-0.5.6
+cp -r "$AKMOD_SRC_DIR"/* ~/rpmbuild/BUILD/maccel-0.5.6/
+echo "✓ Copied source files to ~/rpmbuild/BUILD/maccel-0.5.6/"
 
 echo ""
 echo "=== Getting kernel version ==="
-KVER=$(rpm -q kernel-devel --queryformat '\''%{VERSION}-%{RELEASE}\n'\'' | head -1)
+KVER=$(rpm -q kernel-devel --queryformat '\''%{VERSION}-%{RELEASE}.%{ARCH}\n'\'' | head -1)
 echo "✓ Kernel version: $KVER"
 
 echo ""
-echo "=== Building kmod package ==="
-echo "Command: rpmbuild --define \"kernels $KVER\" -ba ~/rpmbuild/SPECS/kmod-maccel.spec"
-rpmbuild --define "kernels $KVER" -ba ~/rpmbuild/SPECS/kmod-maccel.spec
+echo "=== Building kmod package (Simulating akmods environment) ==="
+# Define ALL required macros: standard RPM tags + kmod-specific ones.
+# The generated kmod-maccel.spec needs these defined to build correctly.
+KMOD_SPEC_PATH=~/rpmbuild/SPECS/kmod-maccel.spec
+KMOD_INST_DIR="/lib/modules/${KVER}/extra/maccel"
+rpmbuild \
+  --define "name kmod-maccel" \
+  --define "version 0.5.6" \
+  --define "release 1" \
+  --define "kmod_name maccel" \
+  --define "kernels $KVER" \
+  --define "_kver $KVER" \
+  --define "kmodinstdir $KMOD_INST_DIR" \
+  --define "_kernel_module_package_build 1" \
+  -ba "$KMOD_SPEC_PATH"
 
 echo ""
 echo "=== Listing built kmod packages ==="

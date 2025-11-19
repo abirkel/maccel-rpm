@@ -9,12 +9,9 @@ echo "=== Starting Fedora container test for akmod build ==="
 # Get current directory for Docker mount
 WORKSPACE_DIR="$(pwd)"
 
-# Run all tests in a Fedora container
-docker run --rm -v "${WORKSPACE_DIR}:/workspace" -w /workspace fedora:latest bash -c '
+# Run all tests in the pre-built Fedora container
+docker run --rm -v "${WORKSPACE_DIR}:/workspace" -w /workspace fedora-rpm-build bash -c '
 set -euo pipefail
-
-echo "=== Installing build dependencies ==="
-dnf install -y rpm-build rpmdevtools kmodtool kernel-devel gcc make spectool
 
 echo "=== Setting up RPM build tree ==="
 rpmdev-setuptree
@@ -28,24 +25,12 @@ spectool -g -R ~/rpmbuild/SPECS/akmod-maccel.spec
 echo "=== Building akmod package ==="
 # Note: akmods is not available in standard Fedora repos (it'\''s in RPMFusion)
 # We'\''ll build without the akmods dependency check for testing purposes
-rpmbuild --define "version 0.5.6" --define "release 1" --nodeps -ba ~/rpmbuild/SPECS/akmod-maccel.spec
+# Use --noclean to preserve BUILD directory for inspection
+rpmbuild --define "version 0.5.6" --define "release 1" --define "_kernel_module_package_build 1" --nodeps --noclean -ba ~/rpmbuild/SPECS/akmod-maccel.spec
 
 echo ""
-echo "=== Verifying generated kmod spec exists ==="
-if [ -f ~/rpmbuild/BUILD/maccel-*/kmod-maccel.spec ]; then
-    echo "✓ Generated kmod spec found"
-    KMOD_SPEC=$(find ~/rpmbuild/BUILD/maccel-* -name "kmod-maccel.spec" | head -1)
-    echo "  Location: $KMOD_SPEC"
-else
-    echo "✗ Generated kmod spec NOT found"
-    exit 1
-fi
-
-echo ""
-echo "=== Verifying generated kmod spec structure ==="
-echo "--- Content of generated kmod spec ---"
-cat "$KMOD_SPEC"
-echo "--- End of kmod spec ---"
+echo "=== Checking if kmod spec was generated in BUILD directory ==="
+find ~/rpmbuild/BUILD -name "kmod-*.spec" -ls || echo "No kmod spec found in BUILD directory"
 
 echo ""
 echo "=== Extracting akmod package to verify contents ==="
@@ -58,7 +43,27 @@ echo "Found akmod RPM: $AKMOD_RPM"
 
 mkdir -p /tmp/akmod-extract
 cd /tmp/akmod-extract
-rpm2cpio "$AKMOD_RPM" | cpio -idmv 2>&1 | head -20
+rpm2cpio "$AKMOD_RPM" | cpio -idmv 2>&1 | grep -E "(kmod-maccel|driver|Makefile)"
+
+echo ""
+echo "=== Verifying generated kmod spec exists ==="
+KMOD_SPEC=$(find /tmp/akmod-extract -name "kmod-maccel.spec" | head -1)
+if [ -z "$KMOD_SPEC" ]; then
+    echo "✗ Generated kmod spec NOT found in akmod package"
+    echo "All files in akmod package:"
+    find /tmp/akmod-extract -type f
+    echo ""
+    echo "Files in akmods directory:"
+    ls -la /tmp/akmod-extract/usr/src/akmods/maccel-*/
+    exit 1
+fi
+echo "✓ Generated kmod spec found: $KMOD_SPEC"
+
+echo ""
+echo "=== Verifying generated kmod spec structure ==="
+echo "--- Content of generated kmod spec (first 50 lines) ---"
+head -50 "$KMOD_SPEC"
+echo "--- End of kmod spec preview ---"
 
 echo ""
 echo "=== Verifying source installed to correct path with release number ==="

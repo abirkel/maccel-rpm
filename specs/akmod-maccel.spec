@@ -44,6 +44,7 @@ KVER=$(rpm -q kernel-devel --queryformat '%%{VERSION}-%%{RELEASE}.%%{ARCH}\n' | 
 kmodtool \
   --kmodname %{kmod_name} \
   --target %{_target_cpu} \
+  --repo free \
   --for-kernels "$KVER" \
   --noakmod > kmod-%{kmod_name}.spec
 
