@@ -314,43 +314,17 @@ jobs:
           name: rpm-packages
           path: artifacts/
 
-      - name: Get container build tag
-        id: container_info
-        run: |
-          CONTAINER_IMAGE="${{ needs.build-rpm.outputs.container_image }}"
-          CONTAINER_VERSION="${{ needs.build-rpm.outputs.container_version }}"
-          IMAGE_FULL="${CONTAINER_IMAGE}:${CONTAINER_VERSION}"
 
-          # Pull image to ensure we have it locally
-          docker pull "${IMAGE_FULL}"
-
-          # Extract build tag from image labels
-          BUILD_TAG=$(docker inspect \
-            --format='{{index .Config.Labels "org.opencontainers.image.version"}}' \
-            "${IMAGE_FULL}")
-
-          if [ -z "$BUILD_TAG" ]; then
-            echo "WARNING: Failed to extract build tag, using container version"
-            BUILD_TAG="${CONTAINER_VERSION}"
-          fi
-
-          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
-          echo "Container build tag: ${BUILD_TAG}"
 
       - name: Prepare release notes
         id: release_notes
         run: |
           VER="${{ needs.build-rpm.outputs.version }}"
-          IMG="${{ needs.build-rpm.outputs.container_image }}"
-          BUILD_TAG="${{ steps.container_info.outputs.build_tag }}"
           REPO="${{ github.repository }}"
 
           {
             echo "notes<<EOF"
             echo "RPM packages for maccel **$VER**"
-            echo ""
-            echo "## Build Information"
-            echo "- **Container Image:** \`${IMG}:${BUILD_TAG}\`"
             echo ""
             echo "> **Note:** The akmod package includes source for automatic kernel module rebuilds via akmods service"
             echo ""
