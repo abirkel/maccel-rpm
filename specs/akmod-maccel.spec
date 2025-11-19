@@ -39,7 +39,8 @@ acceleration curves and parameters through a kernel module and CLI tool.
 
 %build
 # Generate kmod spec using kmodtool
-kmodtool --kmodname %{kmod_name} --target %{_target_cpu} --akmod > kmod-%{kmod_name}.spec
+# Pass version and release to kmodtool for proper kmod spec generation
+kmodtool --kmodname %{kmod_name} --kmodversion %{version} --kmodrelease %{release} --target %{_target_cpu} --akmod > kmod-%{kmod_name}.spec
 
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
@@ -54,10 +55,6 @@ cp kmod-%{kmod_name}.spec %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-
 %{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}/
 
 %changelog
-* Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
-- Update to maccel version 0.5.6
-* Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
-- Update to maccel version 0.5.6
 * Sat Nov 08 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.5-1
 - Update to maccel version 0.5.5
 * Fri Nov 07 2025 Maccel Builder <builder@maccel.local> - 0.5.6-1
