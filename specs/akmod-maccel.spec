@@ -39,10 +39,11 @@ acceleration curves and parameters through a kernel module and CLI tool.
 
 %build
 # Generate the KMOD spec for the kernel module build
-# This spec is designed to be read and executed by the akmods service.
+# Use --for-kernels to specify we want a generic spec for all kernels
 kmodtool \
   --kmodname %{kmod_name} \
-  --target %{_target_cpu} > kmod-%{kmod_name}.spec
+  --target %{_target_cpu} \
+  --for-kernels "" > kmod-%{kmod_name}.spec
 
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
