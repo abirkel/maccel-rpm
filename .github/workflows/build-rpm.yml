@@ -20,7 +20,7 @@ name: Build and Publish RPM Packages
         type: boolean
         default: false
       build_akmod:
-        description: 'Build akmod package'
+        description: 'Build akmod package (includes source for automatic kernel rebuilds)'
         required: false
         type: boolean
         default: true
@@ -29,11 +29,6 @@ name: Build and Publish RPM Packages
         required: false
         type: boolean
         default: true
-      build_kmod:
-        description: 'Build kmod package'
-        required: false
-        type: boolean
-        default: false
       container_image:
         description: |
           Container image to use (leave empty to use build.conf default)
@@ -43,11 +38,6 @@ name: Build and Publish RPM Packages
         default: ''
       fedora_version:
         description: 'Fedora version to use (leave empty to use build.conf default)'
-        required: false
-        type: string
-        default: ''
-      kernel_version:
-        description: 'Kernel version to build for (leave empty to auto-detect)'
         required: false
         type: string
         default: ''
@@ -62,7 +52,6 @@ jobs:
     outputs:
       container_image: ${{ steps.config.outputs.container_image }}
       container_version: ${{ steps.config.outputs.container_version }}
-      enable_kmod: ${{ steps.config.outputs.enable_kmod }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -81,7 +70,6 @@ jobs:
 
           echo "container_image=$FINAL_IMAGE" >> $GITHUB_OUTPUT
           echo "container_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
-          echo "enable_kmod=$ENABLE_KMOD" >> $GITHUB_OUTPUT
 
   update-specs:
     runs-on: ubuntu-latest
@@ -186,7 +174,6 @@ jobs:
     outputs:
       container_image: ${{ needs.load-config.outputs.container_image }}
       container_version: ${{ needs.load-config.outputs.container_version }}
-      kernel_version: ${{ steps.build_info.outputs.kernel_version }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout repository
@@ -200,32 +187,6 @@ jobs:
           VERSION=$(grep "^Version:" specs/maccel.spec | awk '{print $NF}')
           echo "version=v${VERSION}" >> $GITHUB_OUTPUT
           echo "Detected version from spec: v${VERSION}"
-
-      - name: Detect kernel version
-        id: build_info
-        run: |
-          set -euo pipefail
-
-          # Use workflow input if provided, otherwise auto-detect
-          INPUT_KERNEL_VERSION="${{ github.event.inputs.kernel_version }}"
-          
-          if [ -n "$INPUT_KERNEL_VERSION" ]; then
-            KERNEL_VERSION="$INPUT_KERNEL_VERSION"
-            echo "Using kernel version from workflow input: ${KERNEL_VERSION}"
-          else
-            # Auto-detect kernel version from container
-            KERNEL_VERSION=$(rpm -q kernel-devel \
-              --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
-            
-            if [ -z "$KERNEL_VERSION" ]; then
-              echo "ERROR: Failed to extract kernel version"
-              exit 1
-            fi
-            
-            echo "Auto-detected kernel version: ${KERNEL_VERSION}"
-          fi
-
-          echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Install build dependencies
         run: |
@@ -261,41 +222,13 @@ jobs:
         if: github.event.inputs.build_akmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
-          KERNEL_VERSION="${{ steps.build_info.outputs.kernel_version }}"
-          rpmbuild --define "kernel_version ${KERNEL_VERSION}" -ba akmod-maccel.spec
+          rpmbuild -ba maccel-kmod.spec
 
       - name: Build maccel CLI
         if: github.event.inputs.build_cli == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           rpmbuild -ba maccel.spec
-
-      - name: Build kmod-maccel
-        if: |
-          github.event.inputs.build_kmod == 'true' &&
-          needs.load-config.outputs.enable_kmod == 'true'
-        run: |
-          set -euo pipefail
-          
-          # Locate generated kmod spec from akmod build
-          GENERATED_SPEC=$(find ~/rpmbuild/BUILD/maccel-* -name "kmod-maccel.spec" -type f 2>/dev/null | head -1)
-          
-          if [ -z "$GENERATED_SPEC" ]; then
-            echo "ERROR: Generated kmod spec not found in ~/rpmbuild/BUILD/maccel-*/"
-            echo "Available files in BUILD directory:"
-            ls -la ~/rpmbuild/BUILD/ || true
-            exit 1
-          fi
-          
-          echo "Found generated kmod spec at: $GENERATED_SPEC"
-          
-          # Copy generated spec to SPECS directory
-          cp "$GENERATED_SPEC" ~/rpmbuild/SPECS/
-          
-          # Build kmod package with kernel version
-          cd ~/rpmbuild/SPECS
-          KERNEL_VERSION="${{ steps.build_info.outputs.kernel_version }}"
-          rpmbuild --define "kernels ${KERNEL_VERSION}" -ba kmod-maccel.spec
 
       - name: Lint packages
         run: |
@@ -326,7 +259,7 @@ jobs:
           set -euo pipefail
           mkdir -p release-packages
 
-          # Copy akmod packages if built
+          # Copy akmod packages if built (includes akmod-maccel and kmod-maccel metapackage)
           if [ "${{ github.event.inputs.build_akmod }}" == "true" ]; then
             if ls ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm \
                 1>/dev/null 2>&1; then
@@ -335,6 +268,13 @@ jobs:
             else
               echo "ERROR: akmod package build requested but not found"
               exit 1
+            fi
+            
+            # Also copy the kmod-maccel metapackage
+            if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
+                1>/dev/null 2>&1; then
+              cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
+                release-packages/
             fi
           fi
 
@@ -347,22 +287,6 @@ jobs:
               exit 1
             fi
           fi
-
-          # Copy kmod packages if built
-          if [ "${{ github.event.inputs.build_kmod }}" == "true" ]; then
-            if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
-                1>/dev/null 2>&1; then
-              cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
-                release-packages/
-            else
-              echo "ERROR: kmod package build requested but not found"
-              exit 1
-            fi
-          fi
-
-          # Exclude akmod-akmod-maccel and kmod-akmod-maccel (stubs)
-          rm -f release-packages/akmod-akmod-maccel-*.rpm
-          rm -f release-packages/kmod-akmod-maccel-*.rpm
 
           # Copy source RPMs if any packages were built
           if ls ~/rpmbuild/SRPMS/*.src.rpm 1>/dev/null 2>&1; then
@@ -416,12 +340,9 @@ jobs:
       - name: Prepare release notes
         id: release_notes
         run: |
-          source build.conf
-
           VER="${{ needs.build-rpm.outputs.version }}"
           IMG="${{ needs.build-rpm.outputs.container_image }}"
           BUILD_TAG="${{ steps.container_info.outputs.build_tag }}"
-          KVER="${{ needs.build-rpm.outputs.kernel_version }}"
           REPO="${{ github.repository }}"
 
           {
@@ -430,13 +351,8 @@ jobs:
             echo ""
             echo "## Build Information"
             echo "- **Container Image:** \`${IMG}:${BUILD_TAG}\`"
-            echo "- **Kernel Version:** \`$KVER\`"
-
-            if [ "$ENABLE_KMOD" != "true" ]; then
-              echo ""
-              echo "> **Note:** kmod packages disabled (ENABLE_KMOD=false)"
-            fi
-
+            echo ""
+            echo "> **Note:** The akmod package includes source for automatic kernel module rebuilds via akmods service"
             echo ""
             echo "## Installation"
             echo "\`\`\`bash"
