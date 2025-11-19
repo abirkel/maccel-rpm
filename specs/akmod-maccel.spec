@@ -1,6 +1,10 @@
 # akmod-maccel.spec - Automatic kernel module package for maccel mouse acceleration driver
 # This spec file builds an akmod package that automatically rebuilds the kernel module
 # when the kernel is updated, using Fedora's akmods system.
+#
+# rpmlint validation: Passed with 2 acceptable warnings
+# - no-buildroot-tag: BuildRoot is automatically managed in modern RPM
+# - no-%check-section: No tests needed for source-only akmod package
 
 %global debug_package %{nil}
 %global kmod_name maccel
