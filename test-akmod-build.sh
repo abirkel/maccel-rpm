@@ -17,20 +17,20 @@ echo "=== Setting up RPM build tree ==="
 rpmdev-setuptree
 
 echo "=== Copying spec file ==="
-cp /workspace/specs/akmod-maccel.spec ~/rpmbuild/SPECS/
+cp /workspace/specs/maccel-kmod.spec ~/rpmbuild/SPECS/
 
 echo "=== Downloading source with spectool ==="
-spectool -g -R ~/rpmbuild/SPECS/akmod-maccel.spec
+spectool -g -R ~/rpmbuild/SPECS/maccel-kmod.spec
 
 echo "=== Building akmod package ==="
 # Build the akmod package - kmodtool will generate the proper akmod structure
 # Note: We use --nodeps because akmods is not in standard Fedora repos
-rpmbuild --define "version 0.5.6" --define "release 1" --nodeps -ba ~/rpmbuild/SPECS/akmod-maccel.spec
+rpmbuild --define "version 0.5.6" --define "release 1" --nodeps -ba ~/rpmbuild/SPECS/maccel-kmod.spec
 
 echo ""
 echo "=== Verifying akmod package was built ==="
 # Look for the actual akmod package (not the metapackage)
-AKMOD_RPM=$(find ~/rpmbuild/RPMS -name "akmod-akmod-maccel-*.rpm" | head -1)
+AKMOD_RPM=$(find ~/rpmbuild/RPMS -name "akmod-maccel-*.rpm" | head -1)
 if [ -z "$AKMOD_RPM" ]; then
     echo "✗ Akmod RPM not found"
     echo "Available RPMs:"
@@ -41,7 +41,7 @@ echo "✓ Akmod package built: $AKMOD_RPM"
 
 echo ""
 echo "=== Verifying metapackage was also built ==="
-KMOD_META_RPM=$(find ~/rpmbuild/RPMS -name "kmod-akmod-maccel-*.rpm" | head -1)
+KMOD_META_RPM=$(find ~/rpmbuild/RPMS -name "kmod-maccel-*.rpm" | head -1)
 if [ -z "$KMOD_META_RPM" ]; then
     echo "✗ Metapackage RPM not found"
     exit 1
