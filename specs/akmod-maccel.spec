@@ -41,6 +41,10 @@ acceleration curves and parameters through a kernel module and CLI tool.
 # Generate kmod spec using kmodtool
 kmodtool --kmodname %{kmod_name} --target %{_target_cpu} --akmod > kmod-%{kmod_name}.spec
 
+# Add required macro definitions to the generated kmod spec
+# These are needed for the kmod spec to build properly when used by akmods
+sed -i '1i%%global kmod_name %{kmod_name}\n%%global version %{version}\n%%global release %{release}' kmod-%{kmod_name}.spec
+
 %install
 # Install driver source to /usr/src/akmods/ for automatic building
 mkdir -p %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}-%{release}
