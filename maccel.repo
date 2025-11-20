@@ -1,6 +1,0 @@
-[maccel]
-name=Maccel RPM Repository
-baseurl=https://abirkel.github.io/maccel-rpm/
-enabled=1
-gpgcheck=1
-gpgkey=https://raw.githubusercontent.com/abirkel/maccel-rpm/main/RPM-GPG-KEY-maccel
