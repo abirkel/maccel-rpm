@@ -218,13 +218,22 @@ jobs:
         run: |
           cp specs/*.spec ~/rpmbuild/SPECS/
 
-      - name: Build akmod-maccel
+      - name: Build kmod-maccel
         if: github.event.inputs.build_akmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
+          
+          # Get kernel version from installed kernel-devel package
+          KERNEL_VERSION=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}')
+          echo "Building kmod for kernel version: $KERNEL_VERSION"
+          
           VERSION=$(grep "^Version:" maccel-kmod.spec | awk '{print $NF}')
           RELEASE=$(grep "^Release:" maccel-kmod.spec | awk '{print $NF}' | sed 's/%{?dist}//')
-          rpmbuild --define "version ${VERSION}" --define "release ${RELEASE}" -ba maccel-kmod.spec
+          
+          rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
+                   --define "version ${VERSION}" \
+                   --define "release ${RELEASE}" \
+                   -ba maccel-kmod.spec
 
       - name: Build maccel CLI
         if: github.event.inputs.build_cli == 'true'
@@ -263,22 +272,15 @@ jobs:
           set -euo pipefail
           mkdir -p release-packages
 
-          # Copy akmod packages if built (includes akmod-maccel and kmod-maccel metapackage)
+          # Copy kmod packages if built
           if [ "${{ github.event.inputs.build_akmod }}" == "true" ]; then
-            if ls ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm \
-                1>/dev/null 2>&1; then
-              cp ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm \
-                release-packages/
-            else
-              echo "ERROR: akmod package build requested but not found"
-              exit 1
-            fi
-            
-            # Also copy the kmod-maccel metapackage
             if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
                 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
                 release-packages/
+            else
+              echo "ERROR: kmod package build requested but not found"
+              exit 1
             fi
           fi
 
@@ -330,7 +332,7 @@ jobs:
             echo "notes<<EOF"
             echo "RPM packages for maccel **$VER**"
             echo ""
-            echo "> **Note:** The akmod package includes source for automatic kernel module rebuilds via akmods service"
+            echo "> **Note:** The kmod package is built for a specific kernel version"
             echo ""
             echo "## Installation"
             echo "\`\`\`bash"
