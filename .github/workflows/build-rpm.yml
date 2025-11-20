@@ -19,8 +19,8 @@ name: Build and Publish RPM Packages
         required: false
         type: boolean
         default: false
-      build_akmod:
-        description: 'Build akmod package (includes source for automatic kernel rebuilds)'
+      build_kmod:
+        description: 'Build kmod package (kernel module for specific kernel version)'
         required: false
         type: boolean
         default: true
@@ -219,7 +219,7 @@ jobs:
           cp specs/*.spec ~/rpmbuild/SPECS/
 
       - name: Build kmod-maccel
-        if: github.event.inputs.build_akmod == 'true'
+        if: github.event.inputs.build_kmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
           
@@ -273,7 +273,7 @@ jobs:
           mkdir -p release-packages
 
           # Copy kmod packages if built
-          if [ "${{ github.event.inputs.build_akmod }}" == "true" ]; then
+          if [ "${{ github.event.inputs.build_kmod }}" == "true" ]; then
             if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
                 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
