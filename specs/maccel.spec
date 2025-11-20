@@ -5,7 +5,7 @@
 
 Name:           maccel
 Version:        0.5.6
-Release:        0%{?dist}
+Release:        1%{?dist}
 Summary:        CLI tool for maccel mouse acceleration driver
 License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
@@ -79,6 +79,8 @@ fi
 %{_prefix}/lib/udev/maccel_param_ownership_and_resets
 
 %changelog
+* Thu Nov 20 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
+- Rebuild for kernel compatibility
 * Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-3
 - Fix udev scriptlets to skip in container builds (check for systemd)
 
