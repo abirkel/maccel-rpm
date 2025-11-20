@@ -6,7 +6,7 @@
 
 Name:           maccel-kmod
 Version:        0.5.6
-Release:        3%{?dist}
+Release:        0%{?dist}
 Summary:        Akmod package for maccel mouse acceleration kernel module
 License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
