@@ -6,7 +6,7 @@
 
 Name:           maccel-kmod
 Version:        0.5.6
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Akmod package for maccel mouse acceleration kernel module
 License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
@@ -57,7 +57,16 @@ done
 # Install akmod source (kmodtool handles this via %akmod_install macro)
 %{?akmod_install}
 
+# Override the kmodtool-generated %post script to prevent automatic building
+# In ostree/container environments, the module should be built manually with akmods --force
+%post -n akmod-%{kmod_name}
+# Skip automatic build - will be built manually during image creation
+:
+
 %changelog
+* Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-2
+- Disable automatic akmod build in %post for container/ostree environments
+
 * Thu Nov 20 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
 - Rebuild for kernel compatibility
 * Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-3
