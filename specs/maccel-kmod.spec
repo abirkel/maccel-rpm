@@ -1,90 +1,70 @@
-# Build only the akmod package and no kernel module packages:
-%define buildforkernels akmod
+# Build kmod package for a specific kernel version
+# Usage: rpmbuild --define 'kernel_version 6.11.8-300.fc41.x86_64' -ba maccel-kmod.spec
+
+%{!?kernel_version: %{error: kernel_version must be defined. Use: rpmbuild --define 'kernel_version X.X.X-XXX.fcXX.x86_64'}}
+
 %global debug_package %{nil}
 %global kmod_name maccel
-%global pkg_kmod_name maccel-kmod
+%global kernel_version_clean %(echo %{kernel_version} | sed 's/\\.fc/%{?dist}.fc/' | sed 's/\\.fc/.fc/')
 
-Name:           maccel-kmod
+Name:           kmod-%{kmod_name}
 Version:        0.5.6
-Release:        3%{?dist}
-Summary:        Akmod package for maccel mouse acceleration kernel module
+Release:        1%{?dist}
+Summary:        Kernel module for maccel mouse acceleration driver
+
 License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
 Source0:        %{url}/archive/v%{version}/maccel-%{version}.tar.gz
 
-BuildRequires:  kmodtool
+BuildRequires:  kernel-devel = %{kernel_version}
+BuildRequires:  gcc
+BuildRequires:  make
 
-# kmodtool does its magic here - generates the akmod package structure
-%{expand:%(kmodtool --target %{_target_cpu} --kmodname %{kmod_name} --akmod 2>/dev/null) }
+Requires:       kernel = %{kernel_version}
+Provides:       %{kmod_name}-kmod = %{version}-%{release}
 
 %description
-This package provides the akmod package for the maccel mouse acceleration driver.
-The akmod system automatically rebuilds the kernel module when the kernel is updated,
-ensuring that maccel continues to work after kernel updates.
+Kernel module for the maccel mouse acceleration driver, built for kernel %{kernel_version}.
 
 Maccel is a mouse acceleration driver for Linux that provides customizable mouse
 acceleration curves and parameters through a kernel module and CLI tool.
 
+This package contains the pre-compiled kernel module for a specific kernel version.
+
 %prep
-# Error out if there was something wrong with kmodtool:
-%{?kmodtool_check}
-# Print kmodtool output for debugging purposes:
-kmodtool --target %{_target_cpu} --kmodname %{kmod_name} --akmod 2>/dev/null
-
-%autosetup -n %{kmod_name}-%{version}
-
-# Prepare build directories for each kernel version
-for kernel_version in %{?kernel_versions} ; do
-  mkdir -p _kmod_build_${kernel_version%%___*}
-  cp -a driver/* Makefile _kmod_build_${kernel_version%%___*}/
-done
+%autosetup -n maccel-%{version}
 
 %build
-# Build kernel modules for each kernel version
-for kernel_version in %{?kernel_versions} ; do
-  make V=1 %{?_smp_mflags} -C ${kernel_version##*___} M=${PWD}/_kmod_build_${kernel_version%%___*} modules
-done
+# Build the kernel module for the specified kernel version
+make V=1 %{?_smp_mflags} \
+    -C /usr/src/kernels/%{kernel_version} \
+    M=${PWD}/driver \
+    modules
 
 %install
-# Install kernel modules for each kernel version
-for kernel_version in %{?kernel_versions}; do
-  mkdir -p %{buildroot}%{kmodinstdir_prefix}/${kernel_version%%___*}/%{kmodinstdir_postfix}/
-  install -D -m 755 _kmod_build_${kernel_version%%___*}/%{kmod_name}.ko \
-    %{buildroot}%{kmodinstdir_prefix}/${kernel_version%%___*}/%{kmodinstdir_postfix}/
-  chmod a+x %{buildroot}%{kmodinstdir_prefix}/${kernel_version%%___*}/%{kmodinstdir_postfix}/%{kmod_name}.ko
-done
+# Install the kernel module
+install -D -m 644 driver/%{kmod_name}.ko \
+    %{buildroot}/usr/lib/modules/%{kernel_version}/extra/%{kmod_name}/%{kmod_name}.ko
 
-# Install akmod source (kmodtool handles this via %akmod_install macro)
-%{?akmod_install}
+%files
+/usr/lib/modules/%{kernel_version}/extra/%{kmod_name}/%{kmod_name}.ko
 
-# Override the kmodtool-generated %post script to prevent automatic building
-# In ostree/container environments, the module should be built manually with akmods --force
-%post -n akmod-%{kmod_name}
-# Skip automatic build - will be built manually during image creation
-:
+%post
+# Run depmod to update module dependencies
+if [ -x /usr/sbin/depmod ]; then
+    /usr/sbin/depmod -a %{kernel_version} || :
+fi
+
+%postun
+# Run depmod after uninstall
+if [ $1 -eq 0 ]; then
+    if [ -x /usr/sbin/depmod ]; then
+        /usr/sbin/depmod -a %{kernel_version} || :
+    fi
+fi
 
 %changelog
-* Thu Nov 20 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-3
-- Rebuild for kernel compatibility
-* Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-2
-- Disable automatic akmod build in %post for container/ostree environments
-
-* Thu Nov 20 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
-- Rebuild for kernel compatibility
-* Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-3
-- Rebuild with fixed maccel CLI package for container builds
-
-* Thu Nov 20 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-2
-- Rebuild for kernel compatibility
-* Wed Nov 19 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
-- Rebuild for kernel compatibility
-* Wed Nov 19 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-3
-- Rebuild for kernel compatibility
-* Wed Nov 19 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-2
-- Rebuild for kernel compatibility
-* Tue Nov 19 2024 Maccel Builder <builder@maccel.local> - 0.5.6-1
-- Initial akmod package for maccel
-- Refactor to use proper kmodtool --akmod pattern following ublue-os standards
-
-* Fri Nov 08 2024 github-actions[bot] <github-actions[bot]@users.noreply.github.com> - 0.5.5-1
-- Update to maccel version 0.5.5
+* Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-1
+- Convert from akmod to kmod package for atomic/ostree distros
+- Build for specific kernel version passed via macro
+- Remove akmods dependency and automatic rebuild logic
