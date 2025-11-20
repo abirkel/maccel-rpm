@@ -5,7 +5,7 @@
 
 Name:           maccel
 Version:        0.5.6
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        CLI tool for maccel mouse acceleration driver
 License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
@@ -55,16 +55,16 @@ install -D -m 0755 udev_rules/maccel_param_ownership_and_resets %{buildroot}%{_p
 getent group maccel >/dev/null || groupadd -r maccel 2>/dev/null || true
 
 %post
-# Reload udev rules
-if [ -x /usr/bin/udevadm ]; then
+# Reload udev rules (only if systemd is running, not in container builds)
+if [ -x /usr/bin/udevadm ] && [ -d /run/systemd/system ]; then
     /usr/bin/udevadm control --reload-rules || true
     /usr/bin/udevadm trigger --subsystem-match=usb --subsystem-match=input || true
 fi
 
 %postun
-# Reload udev rules after uninstall
+# Reload udev rules after uninstall (only if systemd is running, not in container builds)
 if [ $1 -eq 0 ]; then
-    if [ -x /usr/bin/udevadm ]; then
+    if [ -x /usr/bin/udevadm ] && [ -d /run/systemd/system ]; then
         /usr/bin/udevadm control --reload-rules || true
         /usr/bin/udevadm trigger --subsystem-match=usb --subsystem-match=input || true
     fi
@@ -79,6 +79,9 @@ fi
 %{_prefix}/lib/udev/maccel_param_ownership_and_resets
 
 %changelog
+* Thu Nov 20 2025 Maccel Builder <builder@maccel.local> - 0.5.6-3
+- Fix udev scriptlets to skip in container builds (check for systemd)
+
 * Thu Nov 20 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-2
 - Rebuild for kernel compatibility
 * Wed Nov 19 2025 github-actions[bot]   <github-actions[bot]@users.noreply.github.com> - 0.5.6-1
