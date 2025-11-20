@@ -1,0 +1,46 @@
+# RPM build artifacts
+rpmbuild/
+*.rpm
+*.src.rpm
+*.spec.orig
+*.spec.rej
+
+# Build directories
+BUILD/
+BUILDROOT/
+RPMS/
+SOURCES/
+#SPECS/
+SRPMS/
+
+# Temporary files
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
+
+# Editor files
+.vscode/
+.idea/
+*.iml
+.kiro/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# GPG temporary files
+*.key
+*.key.enc
+private.key*
+
+# Repository metadata
+repodata/
+repo/
+
+# GitHub Actions artifacts
+artifacts/

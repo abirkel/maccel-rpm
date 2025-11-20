@@ -1,0 +1,20 @@
+FROM fedora:latest
+
+# Install build dependencies
+RUN dnf install -y \
+    rpm-build \
+    rpmdevtools \
+    kmodtool \
+    kernel-devel \
+    gcc \
+    make \
+    spectool \
+    rpmlint \
+    && dnf clean all
+
+# Set up rpmdev tree
+RUN rpmdev-setuptree
+
+WORKDIR /workspace
+
+CMD ["/bin/bash"]
