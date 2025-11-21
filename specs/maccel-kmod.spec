@@ -8,8 +8,8 @@
 %global kernel_version_clean %(echo %{kernel_version} | sed 's/\\.fc/%{?dist}.fc/' | sed 's/\\.fc/.fc/')
 
 Name:           kmod-%{kmod_name}
-Version:        0.5.6
-Release:        1%{?dist}
+Version:        %{version}
+Release:        %{release}%{?dist}
 Summary:        Kernel module for maccel mouse acceleration driver
 
 License:        GPL-2.0-or-later
