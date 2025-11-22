@@ -178,6 +178,9 @@ jobs:
       - name: Determine maccel version
         id: maccel
         run: |
+          set -euo pipefail
+          echo "::group::Determining maccel version"
+
           # Use workflow input if provided, otherwise read from file
           INPUT_VERSION="${{ inputs.maccel_version }}"
           if [ -n "$INPUT_VERSION" ]; then
@@ -185,41 +188,74 @@ jobs:
             echo "Using maccel version from workflow input: $INPUT_VERSION"
           elif [ -f .external_versions ]; then
             source .external_versions
+            if [ -z "${MACCEL_VERSION:-}" ]; then
+              echo "::endgroup::"
+              echo "::error::MACCEL_VERSION not set in .external_versions"
+              exit 1
+            fi
             echo "maccel_version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
             echo "Using maccel version from .external_versions: $MACCEL_VERSION"
           else
-            echo "ERROR: No maccel version specified"
-            echo "and .external_versions not found"
-            echo "Provide maccel_version input or ensure"
-            echo ".external_versions exists"
+            echo "::endgroup::"
+            echo "::error::No maccel version specified"
+            echo "::error::.external_versions file not found"
+            echo "::error::Provide maccel_version input or ensure"
+            echo "::error::.external_versions exists"
             exit 1
           fi
+
+          echo "::endgroup::"
 
       - name: Resolve kernel version
         id: resolve
         run: |
+          set -euo pipefail
           KERNEL_TYPE="${{ matrix.kernel_type }}"
           EXPLICIT_VERSION="${{ inputs.kernel_version }}"
+
+          echo "::group::Resolving kernel version for $KERNEL_TYPE"
 
           # Make script executable
           chmod +x scripts/resolve-kernel-version.sh
 
-          # Resolve kernel version
+          # Resolve kernel version with error handling
           if [ -n "$EXPLICIT_VERSION" ]; then
-            KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
+            if ! KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
               --kernel-type "$KERNEL_TYPE" \
-              --version "$EXPLICIT_VERSION")
+              --version "$EXPLICIT_VERSION" 2>&1); then
+              echo "::endgroup::"
+              echo "::error::Failed to resolve kernel version"
+              echo "::error::Kernel type: $KERNEL_TYPE"
+              echo "::error::Explicit version: $EXPLICIT_VERSION"
+              echo "$KERNEL_VERSION"
+              exit 1
+            fi
           else
-            KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
-              --kernel-type "$KERNEL_TYPE")
+            if ! KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
+              --kernel-type "$KERNEL_TYPE" 2>&1); then
+              echo "::endgroup::"
+              echo "::error::Failed to resolve kernel version"
+              echo "::error::Kernel type: $KERNEL_TYPE"
+              echo "$KERNEL_VERSION"
+              exit 1
+            fi
+          fi
+
+          # Validate we got a version
+          if [ -z "$KERNEL_VERSION" ]; then
+            echo "::endgroup::"
+            echo "::error::Kernel version resolution returned empty result"
+            exit 1
           fi
 
           echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
-          echo "Resolved kernel version for $KERNEL_TYPE: $KERNEL_VERSION"
+          echo "✓ Resolved kernel version: $KERNEL_VERSION"
 
           # Store in file for build-rpm job to access
           mkdir -p /tmp/versions
           echo "$KERNEL_VERSION" > "/tmp/versions/${KERNEL_TYPE}_kernel_version"
+
+          echo "::endgroup::"
 
       - name: Upload version info
         uses: actions/upload-artifact@v4
@@ -287,6 +323,7 @@ jobs:
       - name: Fetch kernel-devel packages
         if: inputs.build_kmod == true
         run: |
+          set -euo pipefail
           KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
           KERNEL_TYPE="${{ matrix.kernel_type }}"
           FEDORA_VERSION="${{ needs.load-config.outputs.container_version }}"
@@ -294,37 +331,114 @@ jobs:
           # Make script executable
           chmod +x scripts/fetch-kernel-packages.sh
 
-          # Fetch kernel packages
-          ./scripts/fetch-kernel-packages.sh \
+          # Fetch kernel packages with error handling
+          echo "::group::Fetching kernel-devel packages"
+          if ! ./scripts/fetch-kernel-packages.sh \
             --kernel-version "$KERNEL_VERSION" \
             --kernel-type "$KERNEL_TYPE" \
             --fedora-version "$FEDORA_VERSION" \
-            --output-dir ~/kernel-packages
+            --output-dir ~/kernel-packages; then
+            echo "::endgroup::"
+            echo "::error::Failed to fetch kernel-devel packages"
+            echo "::error::Kernel version: $KERNEL_VERSION"
+            echo "::error::Kernel type: $KERNEL_TYPE"
+            echo "::error::Kernel version not available in repository"
+            echo "::error::For main kernel: Check"
+            echo "::error::https://kojipkgs.fedoraproject.org/packages/kernel/"
+            echo "::error::For bazzite kernel: Check"
+            echo "::error::github.com/bazzite-org/kernel-bazzite/releases"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Verify kernel-devel availability
+        if: inputs.build_kmod == true
+        run: |
+          set -euo pipefail
+          echo "::group::Verifying kernel-devel packages"
+
+          # Check that packages were downloaded
+          if ! ls ~/kernel-packages/kernel-devel*.rpm 1>/dev/null 2>&1; then
+            echo "::error::No kernel-devel packages found in ~/kernel-packages/"
+            echo "::error::Package fetch may have failed silently"
+            exit 1
+          fi
+
+          # Verify packages are not empty
+          for pkg in ~/kernel-packages/kernel-devel*.rpm; do
+            if [ ! -s "$pkg" ]; then
+              echo "::error::Package file is empty: $pkg"
+              exit 1
+            fi
+            echo "✓ Found: $(basename "$pkg") ($(stat -c%s "$pkg") bytes)"
+          done
+
+          echo "::endgroup::"
 
       - name: Install kernel-devel
         if: inputs.build_kmod == true
         run: |
-          dnf install -y ~/kernel-packages/kernel-devel*.rpm
+          set -euo pipefail
+          echo "::group::Installing kernel-devel packages"
+
+          if ! dnf install -y ~/kernel-packages/kernel-devel*.rpm; then
+            echo "::endgroup::"
+            echo "::error::Failed to install kernel-devel packages"
+            echo "::error::Package corruption or dependency issues"
+            exit 1
+          fi
+
+          # Verify installation
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+          if ! rpm -q "kernel-devel-${KERNEL_VERSION}"; then
+            echo "::endgroup::"
+            echo "::error::kernel-devel package not found after installation"
+            echo "::error::Expected: kernel-devel-${KERNEL_VERSION}"
+            exit 1
+          fi
+
+          echo "✓ Successfully installed kernel-devel-${KERNEL_VERSION}"
+          echo "::endgroup::"
 
       - name: Determine release number
         id: release
         run: |
+          set -euo pipefail
           MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
           KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
           KERNEL_TYPE="${{ matrix.kernel_type }}"
 
+          echo "::group::Determining release number"
+
           # Make script executable
           chmod +x scripts/determine-release-number.sh
 
-          # Determine release number
-          RELEASE_NUMBER=$(./scripts/determine-release-number.sh \
+          # Determine release number with error handling
+          if ! RELEASE_NUMBER=$(./scripts/determine-release-number.sh \
             --maccel-version "$MACCEL_VERSION" \
             --kernel-version "$KERNEL_VERSION" \
             --kernel-type "$KERNEL_TYPE" \
-            --repo "${{ github.repository }}")
+            --repo "${{ github.repository }}" 2>&1); then
+            echo "::endgroup::"
+            echo "::error::Failed to determine release number"
+            echo "::error::Maccel version: $MACCEL_VERSION"
+            echo "::error::Kernel version: $KERNEL_VERSION"
+            echo "::error::Kernel type: $KERNEL_TYPE"
+            echo "$RELEASE_NUMBER"
+            exit 1
+          fi
+
+          # Validate release number is a positive integer
+          if ! [[ "$RELEASE_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::endgroup::"
+            echo "::error::Invalid release number: $RELEASE_NUMBER"
+            echo "::error::Expected a positive integer"
+            exit 1
+          fi
 
           echo "release_number=$RELEASE_NUMBER" >> $GITHUB_OUTPUT
-          echo "Determined release number: $RELEASE_NUMBER"
+          echo "✓ Determined release number: $RELEASE_NUMBER"
+          echo "::endgroup::"
 
       - name: Download maccel source
         run: |
@@ -339,6 +453,7 @@ jobs:
       - name: Build kmod-maccel
         if: inputs.build_kmod == true
         run: |
+          set -euo pipefail
           cd ~/rpmbuild/SPECS
 
           KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
@@ -348,19 +463,43 @@ jobs:
           # Strip 'v' prefix from version if present
           VERSION="${MACCEL_VERSION#v}"
 
-          echo "Building kmod for ${{ matrix.kernel_type }}:"
+          echo "::group::Building kmod-maccel for ${{ matrix.kernel_type }}"
           echo "  Kernel version: $KERNEL_VERSION"
           echo "  Maccel version: $VERSION"
           echo "  Release number: $RELEASE_NUMBER"
 
-          rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
+          # Build with log capture
+          BUILD_LOG="/tmp/kmod-build.log"
+          if ! rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
                    --define "version ${VERSION}" \
                    --define "release ${RELEASE_NUMBER}" \
-                   -ba maccel-kmod.spec
+                   -ba maccel-kmod.spec 2>&1 | tee "$BUILD_LOG"; then
+            echo "::endgroup::"
+            echo "::error::kmod-maccel build failed"
+            echo "::group::Build log (last 50 lines)"
+            tail -n 50 "$BUILD_LOG"
+            echo "::endgroup::"
+            echo "::error::Check the build log above for compilation errors"
+            exit 1
+          fi
+
+          # Verify build output
+          if ! ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
+              1>/dev/null 2>&1; then
+            echo "::endgroup::"
+            echo "::error::Build completed but no kmod package found"
+            echo "::error::Expected package in ~/rpmbuild/RPMS/x86_64/"
+            exit 1
+          fi
+
+          echo "✓ Successfully built kmod-maccel"
+          ls -lh ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm
+          echo "::endgroup::"
 
       - name: Build maccel CLI
         if: inputs.build_cli == true && matrix.build_cli == 'true'
         run: |
+          set -euo pipefail
           cd ~/rpmbuild/SPECS
 
           MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
@@ -369,13 +508,35 @@ jobs:
           # Strip 'v' prefix from version if present
           VERSION="${MACCEL_VERSION#v}"
 
-          echo "Building CLI for:"
+          echo "::group::Building maccel CLI"
           echo "  Maccel version: $VERSION"
           echo "  Release number: $RELEASE_NUMBER"
 
-          rpmbuild --define "version ${VERSION}" \
+          # Build with log capture
+          BUILD_LOG="/tmp/cli-build.log"
+          if ! rpmbuild --define "version ${VERSION}" \
                    --define "release ${RELEASE_NUMBER}" \
-                   -ba maccel.spec
+                   -ba maccel.spec 2>&1 | tee "$BUILD_LOG"; then
+            echo "::endgroup::"
+            echo "::error::maccel CLI build failed"
+            echo "::group::Build log (last 50 lines)"
+            tail -n 50 "$BUILD_LOG"
+            echo "::endgroup::"
+            echo "::error::Check the build log above for compilation errors"
+            exit 1
+          fi
+
+          # Verify build output
+          if ! ls ~/rpmbuild/RPMS/x86_64/maccel-*.rpm 1>/dev/null 2>&1; then
+            echo "::endgroup::"
+            echo "::error::Build completed but no CLI package found"
+            echo "::error::Expected package in ~/rpmbuild/RPMS/x86_64/"
+            exit 1
+          fi
+
+          echo "✓ Successfully built maccel CLI"
+          ls -lh ~/rpmbuild/RPMS/x86_64/maccel-*.rpm
+          echo "::endgroup::"
 
       - name: Lint packages
         run: |
@@ -385,6 +546,7 @@ jobs:
       - name: Prepare release packages
         run: |
           set -euo pipefail
+          echo "::group::Preparing release packages"
           mkdir -p release-packages
 
           # Copy kmod packages if built
@@ -393,8 +555,12 @@ jobs:
                 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
                 release-packages/
+              echo "✓ Copied kmod packages"
             else
-              echo "ERROR: kmod package build requested but not found"
+              echo "::endgroup::"
+              echo "::error::kmod package build requested but not found"
+              echo "::error::Expected packages in ~/rpmbuild/RPMS/x86_64/"
+              ls -la ~/rpmbuild/RPMS/x86_64/ || true
               exit 1
             fi
           fi
@@ -404,8 +570,12 @@ jobs:
              [ "${{ matrix.build_cli }}" == "true" ]; then
             if ls ~/rpmbuild/RPMS/x86_64/maccel-*.rpm 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/
+              echo "✓ Copied CLI packages"
             else
-              echo "ERROR: CLI package build requested but not found"
+              echo "::endgroup::"
+              echo "::error::CLI package build requested but not found"
+              echo "::error::Expected packages in ~/rpmbuild/RPMS/x86_64/"
+              ls -la ~/rpmbuild/RPMS/x86_64/ || true
               exit 1
             fi
           fi
@@ -413,7 +583,20 @@ jobs:
           # Copy source RPMs if any packages were built
           if ls ~/rpmbuild/SRPMS/*.src.rpm 1>/dev/null 2>&1; then
             cp ~/rpmbuild/SRPMS/*.src.rpm release-packages/
+            echo "✓ Copied source RPMs"
           fi
+
+          # Verify we have at least one package
+          if ! ls release-packages/*.rpm 1>/dev/null 2>&1; then
+            echo "::endgroup::"
+            echo "::error::No packages found to release"
+            echo "::error::At least one package should have been built"
+            exit 1
+          fi
+
+          echo "Release packages prepared:"
+          ls -lh release-packages/
+          echo "::endgroup::"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -435,10 +618,36 @@ jobs:
           pattern: rpm-packages-*
           merge-multiple: true
 
-      - name: List downloaded packages
+      - name: Verify downloaded packages
         run: |
+          set -euo pipefail
+          echo "::group::Verifying downloaded packages"
+
+          # Check that artifacts directory exists and has packages
+          if [ ! -d "artifacts" ]; then
+            echo "::error::Artifacts directory not found"
+            exit 1
+          fi
+
+          if ! ls artifacts/*.rpm 1>/dev/null 2>&1; then
+            echo "::error::No RPM packages found in artifacts"
+            echo "::error::Build jobs may have failed to produce packages"
+            exit 1
+          fi
+
           echo "Downloaded packages:"
           ls -lh artifacts/
+
+          # Verify each package is not empty
+          for pkg in artifacts/*.rpm; do
+            if [ ! -s "$pkg" ]; then
+              echo "::error::Package file is empty: $pkg"
+              exit 1
+            fi
+          done
+
+          echo "✓ All packages verified"
+          echo "::endgroup::"
 
       - name: Install RPM signing tools
         run: |
@@ -447,39 +656,104 @@ jobs:
 
       - name: Setup GPG for signing
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d > private.key
-          gpg --batch --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
-            --import private.key
-          echo -e "5\ny\n" | gpg --batch --command-fd 0 \
-            --edit-key "${{ secrets.GPG_KEY_ID }}" trust
-          rm private.key
+          set -euo pipefail
+          echo "::group::Setting up GPG for signing"
+
+          # Decode and import private key
+          if ! echo "${{ secrets.GPG_PRIVATE_KEY }}" | \
+              base64 -d > private.key; then
+            echo "::endgroup::"
+            echo "::error::Failed to decode GPG_PRIVATE_KEY"
+            echo "::error::Ensure the secret is properly base64 encoded"
+            exit 1
+          fi
+
+          if ! gpg --batch --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            --import private.key 2>&1; then
+            rm -f private.key
+            echo "::endgroup::"
+            echo "::error::Failed to import GPG private key"
+            echo "::error::Check that GPG_PASSPHRASE is correct"
+            exit 1
+          fi
+
+          # Set trust level
+          if ! echo -e "5\ny\n" | gpg --batch --command-fd 0 \
+            --edit-key "${{ secrets.GPG_KEY_ID }}" trust 2>&1; then
+            rm -f private.key
+            echo "::endgroup::"
+            echo "::error::Failed to set trust level for GPG key"
+            exit 1
+          fi
+
+          rm -f private.key
+          echo "✓ GPG configured successfully"
+          echo "::endgroup::"
 
       - name: Sign all RPM packages
         run: |
+          set -euo pipefail
+          echo "::group::Signing RPM packages"
+
+          # Configure RPM signing
           echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
           echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
           echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes \
             --pinentry-mode loopback --passphrase \
             '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
 
-          # Sign all RPM packages
+          # Sign all RPM packages with error handling
           cd artifacts
+          SIGN_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              rpm --addsign "$rpm"
+              if ! rpm --addsign "$rpm" 2>&1; then
+                echo "::error::Failed to sign package: $rpm"
+                SIGN_FAILED=1
+              fi
             fi
           done
 
+          if [ $SIGN_FAILED -eq 1 ]; then
+            echo "::endgroup::"
+            echo "::error::One or more packages failed to sign"
+            echo "::error::Check GPG configuration and passphrase"
+            exit 1
+          fi
+
+          echo "✓ All packages signed successfully"
+          echo "::endgroup::"
+
       - name: Verify package signatures
         run: |
+          set -euo pipefail
+          echo "::group::Verifying package signatures"
+
           cd artifacts
+          VERIFY_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Verifying signature for $rpm"
-              rpm --checksig "$rpm"
+              if ! rpm --checksig "$rpm" 2>&1 | grep -q "pgp.*OK"; then
+                echo "::error::Signature verification failed for: $rpm"
+                rpm --checksig "$rpm" || true
+                VERIFY_FAILED=1
+              else
+                echo "✓ Signature valid for $rpm"
+              fi
             fi
           done
+
+          if [ $VERIFY_FAILED -eq 1 ]; then
+            echo "::endgroup::"
+            echo "::error::One or more packages have invalid signatures"
+            echo "::error::Refusing to publish unsigned/invalid packages"
+            exit 1
+          fi
+
+          echo "✓ All package signatures verified"
+          echo "::endgroup::"
 
       - name: Prepare release notes
         id: release_notes
@@ -523,10 +797,14 @@ jobs:
       - name: Prepare merged repository
         run: |
           set -euo pipefail
+          echo "::group::Preparing merged repository"
 
           # Install createrepo_c for metadata generation
-          sudo apt-get update
-          sudo apt-get install -y createrepo-c
+          if ! sudo apt-get update && sudo apt-get install -y createrepo-c; then
+            echo "::endgroup::"
+            echo "::error::Failed to install createrepo-c"
+            exit 1
+          fi
 
           # Clone existing gh-pages branch to get current packages
           echo "Cloning existing gh-pages branch..."
@@ -546,17 +824,40 @@ jobs:
 
           # Copy new signed packages
           echo "Copying new signed packages..."
-          cp artifacts/*.rpm repo/ 2>/dev/null || true
+          if ! cp artifacts/*.rpm repo/ 2>/dev/null; then
+            echo "::endgroup::"
+            echo "::error::Failed to copy signed packages to repository"
+            exit 1
+          fi
+
+          # Verify we have packages in repo
+          if ! ls repo/*.rpm 1>/dev/null 2>&1; then
+            echo "::endgroup::"
+            echo "::error::No packages found in repository after merge"
+            exit 1
+          fi
 
           # List all packages in repo
           echo "Packages in repository:"
-          ls -lh repo/*.rpm 2>/dev/null || echo "No packages found"
+          ls -lh repo/*.rpm
 
           # Regenerate metadata for ALL packages
           echo "Regenerating repository metadata..."
-          createrepo_c repo/
+          if ! createrepo_c repo/; then
+            echo "::endgroup::"
+            echo "::error::Failed to generate repository metadata"
+            exit 1
+          fi
 
-          echo "Repository preparation complete"
+          # Verify metadata was created
+          if [ ! -d "repo/repodata" ]; then
+            echo "::endgroup::"
+            echo "::error::Repository metadata directory not created"
+            exit 1
+          fi
+
+          echo "✓ Repository preparation complete"
+          echo "::endgroup::"
 
       - name: Deploy repository to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

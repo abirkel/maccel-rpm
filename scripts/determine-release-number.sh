@@ -73,17 +73,20 @@ echo "Querying GitHub releases..." >&2
 
 # Use gh CLI if available, otherwise fall back to curl
 if command -v gh &> /dev/null; then
-  RELEASES_JSON=$(gh api "repos/${GITHUB_REPO}/releases" --paginate 2>/dev/null) || {
-    echo "Error: Failed to query GitHub releases API using gh CLI"
+  if ! RELEASES_JSON=$(gh api "repos/${GITHUB_REPO}/releases" --paginate 2>&1); then
+    echo "Error: Failed to query GitHub releases API using gh CLI" >&2
+    echo "API response: $RELEASES_JSON" >&2
+    echo "Check repository access and authentication" >&2
     exit 1
-  }
+  fi
 else
   # Fall back to curl with GitHub API
-  RELEASES_JSON=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" 2>/dev/null) || {
-    echo "Error: Failed to query GitHub releases API"
-    echo "Install gh CLI for better API access: https://cli.github.com/"
+  if ! RELEASES_JSON=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" 2>&1); then
+    echo "Error: Failed to query GitHub releases API" >&2
+    echo "API response: $RELEASES_JSON" >&2
+    echo "Install gh CLI for better API access: https://cli.github.com/" >&2
     exit 1
-  }
+  fi
 fi
 
 # Check if we got any releases
@@ -94,10 +97,12 @@ if [[ -z "$RELEASES_JSON" ]] || [[ "$RELEASES_JSON" == "[]" ]]; then
 fi
 
 # Extract all asset names from releases
-ASSET_NAMES=$(echo "$RELEASES_JSON" | jq -r '.[].assets[].name' 2>/dev/null) || {
-  echo "Error: Failed to parse releases JSON"
+if ! ASSET_NAMES=$(echo "$RELEASES_JSON" | jq -r '.[].assets[].name' 2>&1); then
+  echo "Error: Failed to parse releases JSON" >&2
+  echo "jq error: $ASSET_NAMES" >&2
+  echo "Ensure jq is installed and the API response is valid JSON" >&2
   exit 1
-}
+fi
 
 if [[ -z "$ASSET_NAMES" ]]; then
   echo "No release assets found, using release number 1" >&2

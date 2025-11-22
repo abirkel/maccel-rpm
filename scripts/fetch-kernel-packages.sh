@@ -71,7 +71,11 @@ download_with_retry() {
 
   while [[ $retry_count -lt $MAX_RETRIES ]]; do
     echo "Downloading: $url" >&2
-    if curl -fLo "$output_file" "$url" 2>/dev/null; then
+    
+    # Capture HTTP status code
+    HTTP_CODE=$(curl -fLo "$output_file" -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+    
+    if [[ "$HTTP_CODE" == "200" ]]; then
       # Validate file is not empty
       if [[ -s "$output_file" ]]; then
         echo "Successfully downloaded: $(basename "$output_file")" >&2
@@ -80,14 +84,19 @@ download_with_retry() {
         echo "Warning: Downloaded file is empty, retrying..." >&2
         rm -f "$output_file"
       fi
+    elif [[ "$HTTP_CODE" == "404" ]]; then
+      echo "Error: Package not found (HTTP 404): $url" >&2
+      echo "The kernel version may not be available in the repository" >&2
+      rm -f "$output_file"
+      return 1
     else
-      echo "Warning: Download failed, retrying..." >&2
+      echo "Warning: Download failed (HTTP $HTTP_CODE), retrying..." >&2
       rm -f "$output_file"
     fi
     retry_count=$((retry_count + 1))
   done
 
-  echo "Error: Failed to download $url after $MAX_RETRIES attempts"
+  echo "Error: Failed to download $url after $MAX_RETRIES attempts" >&2
   return 1
 }
 
@@ -113,14 +122,18 @@ if [[ "$KERNEL_TYPE" == "main" ]]; then
   # Download kernel-devel
   KERNEL_DEVEL_FILE="kernel-devel-${KERNEL_VERSION}.rpm"
   if ! download_with_retry "${BASE_URL}/${KERNEL_DEVEL_FILE}" "${OUTPUT_DIR}/${KERNEL_DEVEL_FILE}"; then
-    echo "Error: Failed to download kernel-devel package"
+    echo "Error: Failed to download kernel-devel package" >&2
+    echo "URL: ${BASE_URL}/${KERNEL_DEVEL_FILE}" >&2
+    echo "Verify the kernel version exists at: https://kojipkgs.fedoraproject.org/packages/kernel/" >&2
     exit 1
   fi
 
   # Download kernel-devel-matched
   KERNEL_DEVEL_MATCHED_FILE="kernel-devel-matched-${KERNEL_VERSION}.rpm"
   if ! download_with_retry "${BASE_URL}/${KERNEL_DEVEL_MATCHED_FILE}" "${OUTPUT_DIR}/${KERNEL_DEVEL_MATCHED_FILE}"; then
-    echo "Error: Failed to download kernel-devel-matched package"
+    echo "Error: Failed to download kernel-devel-matched package" >&2
+    echo "URL: ${BASE_URL}/${KERNEL_DEVEL_MATCHED_FILE}" >&2
+    echo "Verify the kernel version exists at: https://kojipkgs.fedoraproject.org/packages/kernel/" >&2
     exit 1
   fi
 
@@ -145,31 +158,43 @@ elif [[ "$KERNEL_TYPE" == "bazzite" ]]; then
   # Download kernel-devel
   KERNEL_DEVEL_FILE="kernel-devel-${KERNEL_VERSION}.rpm"
   if ! download_with_retry "${BASE_URL}/${KERNEL_DEVEL_FILE}" "${OUTPUT_DIR}/${KERNEL_DEVEL_FILE}"; then
-    echo "Error: Failed to download kernel-devel package for Bazzite kernel"
-    echo "Verify the kernel version exists in Bazzite releases: https://github.com/bazzite-org/kernel-bazzite/releases"
+    echo "Error: Failed to download kernel-devel package for Bazzite kernel" >&2
+    echo "URL: ${BASE_URL}/${KERNEL_DEVEL_FILE}" >&2
+    echo "Verify the kernel version exists in Bazzite releases: https://github.com/bazzite-org/kernel-bazzite/releases" >&2
     exit 1
   fi
 
   # Download kernel-devel-matched
   KERNEL_DEVEL_MATCHED_FILE="kernel-devel-matched-${KERNEL_VERSION}.rpm"
   if ! download_with_retry "${BASE_URL}/${KERNEL_DEVEL_MATCHED_FILE}" "${OUTPUT_DIR}/${KERNEL_DEVEL_MATCHED_FILE}"; then
-    echo "Error: Failed to download kernel-devel-matched package for Bazzite kernel"
+    echo "Error: Failed to download kernel-devel-matched package for Bazzite kernel" >&2
+    echo "URL: ${BASE_URL}/${KERNEL_DEVEL_MATCHED_FILE}" >&2
+    echo "Verify the kernel version exists in Bazzite releases: https://github.com/bazzite-org/kernel-bazzite/releases" >&2
     exit 1
   fi
 fi
 
 # Verify all packages exist and are non-empty
 echo "Verifying downloaded packages:" >&2
+PACKAGE_COUNT=0
 for package in "${OUTPUT_DIR}"/kernel-devel*.rpm; do
   if [[ ! -f "$package" ]]; then
-    echo "Error: Package file not found: $package"
+    echo "Error: Package file not found: $package" >&2
     exit 1
   fi
   if [[ ! -s "$package" ]]; then
-    echo "Error: Package file is empty: $package"
+    echo "Error: Package file is empty: $package" >&2
     exit 1
   fi
+  PACKAGE_COUNT=$((PACKAGE_COUNT + 1))
   echo "  ✓ $(basename "$package") ($(stat -f%z "$package" 2>/dev/null || stat -c%s "$package" 2>/dev/null) bytes)" >&2
 done
 
-echo "Successfully fetched all kernel packages" >&2
+# Ensure we downloaded at least 2 packages (kernel-devel and kernel-devel-matched)
+if [[ $PACKAGE_COUNT -lt 2 ]]; then
+  echo "Error: Expected at least 2 packages, found $PACKAGE_COUNT" >&2
+  echo "Missing kernel-devel or kernel-devel-matched package" >&2
+  exit 1
+fi
+
+echo "Successfully fetched all kernel packages ($PACKAGE_COUNT packages)" >&2

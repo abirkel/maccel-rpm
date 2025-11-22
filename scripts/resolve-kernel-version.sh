@@ -63,17 +63,21 @@ fi
 echo "Inspecting image: $IMAGE" >&2
 
 # Use skopeo to inspect the image
-INSPECT_OUTPUT=$(skopeo inspect "docker://$IMAGE" 2>/dev/null) || {
-  echo "Error: Failed to inspect image $IMAGE"
-  echo "Make sure skopeo is installed and the image is accessible"
+if ! INSPECT_OUTPUT=$(skopeo inspect "docker://$IMAGE" 2>&1); then
+  echo "Error: Failed to inspect image $IMAGE" >&2
+  echo "Skopeo error: $INSPECT_OUTPUT" >&2
+  echo "Make sure skopeo is installed and the image is accessible" >&2
+  echo "Check image availability at: https://github.com/orgs/ublue-os/packages" >&2
   exit 1
-}
+fi
 
 # Extract ostree.linux label from the inspection output
-KERNEL_VERSION=$(echo "$INSPECT_OUTPUT" | jq -r '.Labels."ostree.linux" // empty' 2>/dev/null) || {
-  echo "Error: Failed to parse image inspection output"
+if ! KERNEL_VERSION=$(echo "$INSPECT_OUTPUT" | jq -r '.Labels."ostree.linux" // empty' 2>&1); then
+  echo "Error: Failed to parse image inspection output" >&2
+  echo "jq error: $KERNEL_VERSION" >&2
+  echo "Ensure jq is installed" >&2
   exit 1
-}
+fi
 
 # Validate that we got a kernel version
 if [[ -z "$KERNEL_VERSION" ]]; then
