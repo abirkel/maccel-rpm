@@ -4,14 +4,13 @@ name: Build and Publish RPM Packages
 'on':
   workflow_dispatch:
     inputs:
-      kernel_type:
-        description: 'Kernel type: main (Aurora) or bazzite'
+      kernel_types:
+        description: >-
+          Kernel types to build (comma-separated: main, bazzite,
+          or main,bazzite)
         required: false
-        type: choice
-        options:
-          - main
-          - bazzite
-        default: main
+        type: string
+        default: 'main'
       kernel_version:
         description: 'Specific kernel version (leave empty for latest)'
         required: false
@@ -28,7 +27,50 @@ name: Build and Publish RPM Packages
         type: boolean
         default: true
       build_cli:
-        description: 'Build CLI package'
+        description: >-
+          Build CLI package (only built for main kernel type)
+        required: false
+        type: boolean
+        default: true
+      container_image:
+        description: >-
+          Container image for build (leave empty to use build.conf default)
+        required: false
+        type: string
+        default: ''
+      fedora_version:
+        description: >-
+          Fedora version (leave empty to use build.conf default)
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      kernel_types:
+        description: >-
+          Kernel types to build (comma-separated: main, bazzite,
+          or main,bazzite)
+        required: false
+        type: string
+        default: 'main'
+      kernel_version:
+        description: 'Specific kernel version (leave empty for latest)'
+        required: false
+        type: string
+        default: ''
+      maccel_version:
+        description: 'Maccel version to build (e.g., v0.5.6)'
+        required: false
+        type: string
+        default: ''
+      build_kmod:
+        description: 'Build kmod package'
+        required: false
+        type: boolean
+        default: true
+      build_cli:
+        description: >-
+          Build CLI package (only built for main kernel type)
         required: false
         type: boolean
         default: true
@@ -74,10 +116,55 @@ jobs:
           echo "container_image=$FINAL_IMAGE" >> $GITHUB_OUTPUT
           echo "container_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
 
-  resolve-versions:
+  generate-matrix:
     runs-on: ubuntu-latest
     outputs:
-      kernel_version: ${{ steps.resolve.outputs.kernel_version }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Generate build matrix
+        id: set-matrix
+        run: |
+          KERNEL_TYPES="${{ inputs.kernel_types }}"
+
+          # Parse comma-separated kernel types
+          IFS=',' read -ra TYPES <<< "$KERNEL_TYPES"
+
+          # Build JSON matrix
+          MATRIX_JSON='{"include":['
+          FIRST=true
+
+          for TYPE in "${TYPES[@]}"; do
+            # Trim whitespace
+            TYPE=$(echo "$TYPE" | xargs)
+
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              MATRIX_JSON="$MATRIX_JSON,"
+            fi
+
+            # Only main kernel type builds CLI
+            if [ "$TYPE" = "main" ]; then
+              BUILD_CLI="true"
+            else
+              BUILD_CLI="false"
+            fi
+
+            MATRIX_JSON="$MATRIX_JSON"'{"kernel_type":"'"$TYPE"'",'
+            MATRIX_JSON="$MATRIX_JSON"'"build_cli":"'"$BUILD_CLI"'"}'
+          done
+
+          MATRIX_JSON="$MATRIX_JSON"']}'
+
+          echo "Generated matrix: $MATRIX_JSON"
+          echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
+
+  resolve-versions:
+    needs: generate-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    outputs:
       maccel_version: ${{ steps.maccel.outputs.maccel_version }}
     steps:
       - name: Checkout repository
@@ -92,7 +179,7 @@ jobs:
         id: maccel
         run: |
           # Use workflow input if provided, otherwise read from file
-          INPUT_VERSION="${{ github.event.inputs.maccel_version }}"
+          INPUT_VERSION="${{ inputs.maccel_version }}"
           if [ -n "$INPUT_VERSION" ]; then
             echo "maccel_version=$INPUT_VERSION" >> $GITHUB_OUTPUT
             echo "Using maccel version from workflow input: $INPUT_VERSION"
@@ -111,8 +198,8 @@ jobs:
       - name: Resolve kernel version
         id: resolve
         run: |
-          KERNEL_TYPE="${{ github.event.inputs.kernel_type }}"
-          EXPLICIT_VERSION="${{ github.event.inputs.kernel_version }}"
+          KERNEL_TYPE="${{ matrix.kernel_type }}"
+          EXPLICIT_VERSION="${{ inputs.kernel_version }}"
 
           # Make script executable
           chmod +x scripts/resolve-kernel-version.sh
@@ -128,24 +215,62 @@ jobs:
           fi
 
           echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
-          echo "Resolved kernel version: $KERNEL_VERSION"
+          echo "Resolved kernel version for $KERNEL_TYPE: $KERNEL_VERSION"
+
+          # Store in file for build-rpm job to access
+          mkdir -p /tmp/versions
+          echo "$KERNEL_VERSION" > "/tmp/versions/${KERNEL_TYPE}_kernel_version"
+
+      - name: Upload version info
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-${{ matrix.kernel_type }}
+          path: /tmp/versions/${{ matrix.kernel_type }}_kernel_version
 
   build-rpm:
-    needs: [load-config, resolve-versions]
+    needs: [load-config, generate-matrix, resolve-versions]
     runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      fail-fast: false
     container:
       image: >-
         ${{ needs.load-config.outputs.container_image }}:${{
         needs.load-config.outputs.container_version }}
-    outputs:
-      maccel_version: >-
-        ${{ needs.resolve-versions.outputs.maccel_version }}
-      kernel_version: >-
-        ${{ needs.resolve-versions.outputs.kernel_version }}
-      kernel_type: ${{ github.event.inputs.kernel_type }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download version info
+        uses: actions/download-artifact@v4
+        with:
+          name: version-${{ matrix.kernel_type }}
+          path: /tmp/versions
+
+      - name: Load kernel version
+        id: load_version
+        run: |
+          KERNEL_TYPE="${{ matrix.kernel_type }}"
+          KERNEL_VERSION=$(cat "/tmp/versions/${KERNEL_TYPE}_kernel_version")
+          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "Loaded kernel version for $KERNEL_TYPE: $KERNEL_VERSION"
+
+      - name: Load maccel version
+        id: load_maccel
+        run: |
+          # Use workflow input if provided, otherwise read from file
+          INPUT_VERSION="${{ inputs.maccel_version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "maccel_version=$INPUT_VERSION" >> $GITHUB_OUTPUT
+            echo "Using maccel version from workflow input: $INPUT_VERSION"
+          elif [ -f .external_versions ]; then
+            source .external_versions
+            echo "maccel_version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
+            echo "Using maccel version from .external_versions: $MACCEL_VERSION"
+          else
+            echo "ERROR: No maccel version specified"
+            exit 1
+          fi
 
       - name: Install build dependencies
         run: |
@@ -160,10 +285,10 @@ jobs:
         run: rpmdev-setuptree
 
       - name: Fetch kernel-devel packages
-        if: github.event.inputs.build_kmod == 'true'
+        if: inputs.build_kmod == true
         run: |
-          KERNEL_VERSION="${{ needs.resolve-versions.outputs.kernel_version }}"
-          KERNEL_TYPE="${{ github.event.inputs.kernel_type }}"
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+          KERNEL_TYPE="${{ matrix.kernel_type }}"
           FEDORA_VERSION="${{ needs.load-config.outputs.container_version }}"
 
           # Make script executable
@@ -177,16 +302,16 @@ jobs:
             --output-dir ~/kernel-packages
 
       - name: Install kernel-devel
-        if: github.event.inputs.build_kmod == 'true'
+        if: inputs.build_kmod == true
         run: |
           dnf install -y ~/kernel-packages/kernel-devel*.rpm
 
       - name: Determine release number
         id: release
         run: |
-          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
-          KERNEL_VERSION="${{ needs.resolve-versions.outputs.kernel_version }}"
-          KERNEL_TYPE="${{ github.event.inputs.kernel_type }}"
+          MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+          KERNEL_TYPE="${{ matrix.kernel_type }}"
 
           # Make script executable
           chmod +x scripts/determine-release-number.sh
@@ -212,18 +337,18 @@ jobs:
           cp specs/*.spec ~/rpmbuild/SPECS/
 
       - name: Build kmod-maccel
-        if: github.event.inputs.build_kmod == 'true'
+        if: inputs.build_kmod == true
         run: |
           cd ~/rpmbuild/SPECS
 
-          KERNEL_VERSION="${{ needs.resolve-versions.outputs.kernel_version }}"
-          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+          MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
           RELEASE_NUMBER="${{ steps.release.outputs.release_number }}"
 
           # Strip 'v' prefix from version if present
           VERSION="${MACCEL_VERSION#v}"
 
-          echo "Building kmod for:"
+          echo "Building kmod for ${{ matrix.kernel_type }}:"
           echo "  Kernel version: $KERNEL_VERSION"
           echo "  Maccel version: $VERSION"
           echo "  Release number: $RELEASE_NUMBER"
@@ -234,11 +359,11 @@ jobs:
                    -ba maccel-kmod.spec
 
       - name: Build maccel CLI
-        if: github.event.inputs.build_cli == 'true'
+        if: inputs.build_cli == true && matrix.build_cli == 'true'
         run: |
           cd ~/rpmbuild/SPECS
 
-          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
+          MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
           RELEASE_NUMBER="${{ steps.release.outputs.release_number }}"
 
           # Strip 'v' prefix from version if present
@@ -282,7 +407,7 @@ jobs:
           mkdir -p release-packages
 
           # Copy kmod packages if built
-          if [ "${{ github.event.inputs.build_kmod }}" == "true" ]; then
+          if [ "${{ inputs.build_kmod }}" == "true" ]; then
             if ls ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
                 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm \
@@ -293,8 +418,9 @@ jobs:
             fi
           fi
 
-          # Copy CLI packages if built
-          if [ "${{ github.event.inputs.build_cli }}" == "true" ]; then
+          # Copy CLI packages if built (only for main kernel type)
+          if [ "${{ inputs.build_cli }}" == "true" ] && \
+             [ "${{ matrix.build_cli }}" == "true" ]; then
             if ls ~/rpmbuild/RPMS/x86_64/maccel-*.rpm 1>/dev/null 2>&1; then
               cp ~/rpmbuild/RPMS/x86_64/maccel-*.rpm release-packages/
             else
@@ -311,39 +437,45 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-packages
+          name: rpm-packages-${{ matrix.kernel_type }}
           path: release-packages/
 
   publish:
-    needs: build-rpm
+    needs: [build-rpm, resolve-versions]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: rpm-packages
           path: artifacts/
+          pattern: rpm-packages-*
+          merge-multiple: true
+
+      - name: List downloaded packages
+        run: |
+          echo "Downloaded packages:"
+          ls -lh artifacts/
 
       - name: Prepare release notes
         id: release_notes
         run: |
-          VER="${{ needs.build-rpm.outputs.maccel_version }}"
-          KERNEL_VER="${{ needs.build-rpm.outputs.kernel_version }}"
-          KERNEL_TYPE="${{ needs.build-rpm.outputs.kernel_type }}"
+          VER="${{ needs.resolve-versions.outputs.maccel_version }}"
+          KERNEL_TYPES="${{ inputs.kernel_types }}"
           REPO="${{ github.repository }}"
 
           {
             echo "notes<<EOF"
             echo "RPM packages for maccel **$VER**"
             echo ""
-            echo "**Kernel Type:** $KERNEL_TYPE"
-            echo "**Kernel Version:** $KERNEL_VER"
+            echo "**Kernel Types:** $KERNEL_TYPES"
             echo ""
-            echo "> **Note:** The kmod package is built for a"
-            echo "> specific kernel version"
+            echo "> **Note:** The kmod packages are built for"
+            echo "> specific kernel versions. Install the package"
+            echo "> matching your kernel type (main for Aurora,"
+            echo "> bazzite for Bazzite)."
             echo ""
             echo "## Installation"
             echo "\`\`\`bash"
@@ -360,7 +492,7 @@ jobs:
       - name: Create release with packages
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ needs.build-rpm.outputs.maccel_version }}
+          tag_name: build-${{ needs.resolve-versions.outputs.maccel_version }}
           files: artifacts/*
           body: ${{ steps.release_notes.outputs.notes }}
 
