@@ -33,6 +33,38 @@ The build workflow consists of five jobs that run in sequence:
 - Automatically triggers kmod-only rebuilds when the kernel updates
 - Supports multiple registries: GitHub Container Registry (ghcr.io), Quay.io, and Docker Hub
 
+### Version Tracking (`.external_versions`)
+
+The `.external_versions` file tracks the last known versions of maccel and target kernel versions to detect when new builds are needed. This file is automatically updated by the `check-release.yml` workflow.
+
+**File Format:**
+```bash
+MACCEL_VERSION=v0.5.6
+AURORA_KERNEL_VERSION=6.17.8-300.fc43.x86_64
+BAZZITE_KERNEL_VERSION=6.17.7-ba14.fc43.x86_64
+```
+
+**Fields:**
+- `MACCEL_VERSION`: Latest maccel release version from upstream repository
+- `AURORA_KERNEL_VERSION`: Kernel version from Aurora image (ostree.linux label)
+- `BAZZITE_KERNEL_VERSION`: Kernel version from Bazzite image (ostree.linux label)
+
+**How It Works:**
+1. The workflow queries current versions from upstream sources
+2. Compares them with values in `.external_versions`
+3. If any version has changed, triggers appropriate builds
+4. Updates `.external_versions` with new values after successful build
+
+**Manual Updates:**
+You can manually edit this file to force a rebuild:
+```bash
+# Edit the file to change a version
+vim .external_versions
+
+# Commit and push
+git add .external_versions && git commit -m "chore: force rebuild for kernel update" && git push
+```
+
 ## Manual Builds
 
 Trigger builds manually via GitHub Actions with custom options:
