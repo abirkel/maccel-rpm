@@ -1,0 +1,155 @@
+#!/bin/bash
+set -euo pipefail
+
+# Release Number Determination Script
+# Queries GitHub releases to determine the next release number
+# Implements increment logic: same version → increment, new version → 1
+
+# Default values
+MACCEL_VERSION=""
+KERNEL_VERSION=""
+KERNEL_TYPE=""
+GITHUB_REPO="abirkel/maccel-rpm"
+
+# Parse CLI options
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --maccel-version)
+      MACCEL_VERSION="$2"
+      shift 2
+      ;;
+    --kernel-version)
+      KERNEL_VERSION="$2"
+      shift 2
+      ;;
+    --kernel-type)
+      KERNEL_TYPE="$2"
+      shift 2
+      ;;
+    --repo)
+      GITHUB_REPO="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0 --maccel-version <version> --kernel-version <version> --kernel-type <main|bazzite> [--repo <owner/repo>]"
+      exit 1
+      ;;
+  esac
+done
+
+# Validate required parameters
+if [[ -z "$MACCEL_VERSION" ]]; then
+  echo "Error: --maccel-version is required"
+  exit 1
+fi
+
+if [[ -z "$KERNEL_VERSION" ]]; then
+  echo "Error: --kernel-version is required"
+  exit 1
+fi
+
+if [[ -z "$KERNEL_TYPE" ]]; then
+  echo "Error: --kernel-type is required"
+  exit 1
+fi
+
+if [[ "$KERNEL_TYPE" != "main" && "$KERNEL_TYPE" != "bazzite" ]]; then
+  echo "Error: kernel-type must be 'main' or 'bazzite', got '$KERNEL_TYPE'"
+  exit 1
+fi
+
+# Strip 'v' prefix from maccel version if present
+MACCEL_VERSION="${MACCEL_VERSION#v}"
+
+echo "Determining release number for:" >&2
+echo "  Maccel version: $MACCEL_VERSION" >&2
+echo "  Kernel version: $KERNEL_VERSION" >&2
+echo "  Kernel type: $KERNEL_TYPE" >&2
+echo "  Repository: $GITHUB_REPO" >&2
+
+# Query GitHub releases API
+echo "Querying GitHub releases..." >&2
+
+# Use gh CLI if available, otherwise fall back to curl
+if command -v gh &> /dev/null; then
+  RELEASES_JSON=$(gh api "repos/${GITHUB_REPO}/releases" --paginate 2>/dev/null) || {
+    echo "Error: Failed to query GitHub releases API using gh CLI"
+    exit 1
+  }
+else
+  # Fall back to curl with GitHub API
+  RELEASES_JSON=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" 2>/dev/null) || {
+    echo "Error: Failed to query GitHub releases API"
+    echo "Install gh CLI for better API access: https://cli.github.com/"
+    exit 1
+  }
+fi
+
+# Check if we got any releases
+if [[ -z "$RELEASES_JSON" ]] || [[ "$RELEASES_JSON" == "[]" ]]; then
+  echo "No existing releases found, using release number 1" >&2
+  echo "1"
+  exit 0
+fi
+
+# Extract all asset names from releases
+ASSET_NAMES=$(echo "$RELEASES_JSON" | jq -r '.[].assets[].name' 2>/dev/null) || {
+  echo "Error: Failed to parse releases JSON"
+  exit 1
+}
+
+if [[ -z "$ASSET_NAMES" ]]; then
+  echo "No release assets found, using release number 1" >&2
+  echo "1"
+  exit 0
+fi
+
+# Look for kmod packages matching our version and kernel version
+# Package naming pattern: kmod-maccel-VERSION-RELEASE.KERNEL_VERSION.rpm
+# Example: kmod-maccel-0.5.6-1.6.17.8-300.fc43.x86_64.rpm
+
+echo "Searching for existing packages..." >&2
+
+# Escape dots in version strings for regex
+MACCEL_VERSION_ESCAPED="${MACCEL_VERSION//./\\.}"
+KERNEL_VERSION_ESCAPED="${KERNEL_VERSION//./\\.}"
+
+# Find matching packages and extract release numbers
+# Pattern: kmod-maccel-VERSION-RELEASE.KERNEL_VERSION.rpm
+MATCHING_PACKAGES=$(echo "$ASSET_NAMES" | grep -E "^kmod-maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.${KERNEL_VERSION_ESCAPED}\.rpm$" || true)
+
+if [[ -z "$MATCHING_PACKAGES" ]]; then
+  echo "No matching packages found for version $MACCEL_VERSION and kernel $KERNEL_VERSION" >&2
+  echo "Using release number 1" >&2
+  echo "1"
+  exit 0
+fi
+
+echo "Found matching packages:" >&2
+while IFS= read -r pkg; do
+  echo "  $pkg" >&2
+done <<< "$MATCHING_PACKAGES"
+
+# Extract release numbers from matching packages
+# Pattern: kmod-maccel-VERSION-RELEASE.KERNEL_VERSION.rpm
+# We need to extract RELEASE (the number between VERSION- and .KERNEL_VERSION)
+RELEASE_NUMBERS=$(echo "$MATCHING_PACKAGES" | sed -E "s/^kmod-maccel-${MACCEL_VERSION_ESCAPED}-([0-9]+)\.${KERNEL_VERSION_ESCAPED}\.rpm$/\1/")
+
+# Find the highest release number
+MAX_RELEASE=0
+while IFS= read -r release; do
+  if [[ -n "$release" ]] && [[ "$release" =~ ^[0-9]+$ ]]; then
+    if [[ "$release" -gt "$MAX_RELEASE" ]]; then
+      MAX_RELEASE="$release"
+    fi
+  fi
+done <<< "$RELEASE_NUMBERS"
+
+# Increment the release number
+NEXT_RELEASE=$((MAX_RELEASE + 1))
+
+echo "Highest existing release: $MAX_RELEASE" >&2
+echo "Next release number: $NEXT_RELEASE" >&2
+
+echo "$NEXT_RELEASE"
