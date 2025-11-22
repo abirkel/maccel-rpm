@@ -8,17 +8,21 @@ This guide covers common issues you may encounter when installing or using macce
 
 **Solutions**:
 ```bash
-# Check if akmod build completed successfully
-sudo akmods --force --kernel $(uname -r)
+# Check if the kmod package is installed
+rpm -q kmod-maccel
 
-# Check akmod logs
-sudo journalctl -u akmods
+# Verify the module file exists for your kernel
+ls -l /lib/modules/$(uname -r)/extra/maccel/
 
 # Manually load the module
 sudo modprobe maccel
 
-# Check for build errors
-ls -l /usr/src/akmods/maccel-kmod-*/
+# Check kernel logs for errors
+sudo dmesg | grep maccel
+
+# If module file doesn't exist, you may need the kmod package for your kernel version
+# Check available kmod packages in the repository
+dnf list available kmod-maccel
 ```
 
 ## Permission Denied Errors
@@ -70,15 +74,25 @@ sudo rpm --import https://raw.githubusercontent.com/abirkel/maccel-rpm/main/RPM-
 
 **Solutions**:
 ```bash
-# The akmod should rebuild automatically, but you can force it
-sudo akmods --force --kernel $(uname -r)
+# Check if a kmod package exists for your new kernel version
+KERNEL_VERSION=$(uname -r)
+dnf list available "kmod-maccel-*${KERNEL_VERSION}*"
 
-# Check if the module exists for your kernel
-ls -l /lib/modules/$(uname -r)/extra/maccel.ko
+# If available, update the kmod package
+sudo dnf update kmod-maccel
 
-# Reboot if necessary
-sudo reboot
+# If not available, the repository may not have built packages for your kernel yet
+# Check the repository for available kernel versions
+dnf repoquery kmod-maccel --qf "%{version}-%{release}"
+
+# You can also check the GitHub releases page for available packages
+# https://github.com/abirkel/maccel-rpm/releases
+
+# As a temporary workaround, you can boot into your previous kernel
+# and wait for the new kmod package to be built
 ```
+
+**Note**: Unlike akmod packages that rebuild automatically, kmod packages are pre-compiled for specific kernel versions. When you update your kernel, you need a kmod package built for that specific kernel version. The repository automatically builds new kmod packages when kernel updates are detected, but there may be a delay.
 
 ## Checking Build Status
 
@@ -101,3 +115,55 @@ If you encounter problems not covered here:
    - Package versions (`rpm -qa | grep maccel`)
    - Relevant log output
    - Steps to reproduce the problem
+
+
+## Wrong Kernel Type
+
+**Problem**: Installed kmod package doesn't match your distribution's kernel type.
+
+**Symptoms**:
+- Module file doesn't exist for your kernel version
+- Package name shows different kernel version format than your system
+
+**Solutions**:
+```bash
+# Check your kernel version
+uname -r
+
+# Aurora/Fedora main kernel format: 6.17.8-300.fc43.x86_64
+# Bazzite kernel format: 6.17.7-ba14.fc43.x86_64
+
+# If you're on Aurora, you need the main kernel type kmod
+# If you're on Bazzite, you need the bazzite kernel type kmod
+
+# Check what kmod packages are available
+dnf repoquery kmod-maccel --qf "%{version}-%{release}"
+
+# Install the package matching your kernel version
+sudo dnf install kmod-maccel-0.5.6-1.6.17.8-300.fc43.x86_64  # For Aurora
+# or
+sudo dnf install kmod-maccel-0.5.6-1.6.17.7-ba14.fc43.x86_64  # For Bazzite
+```
+
+## Repository Not Building for My Kernel
+
+**Problem**: The repository doesn't have kmod packages for your current kernel version.
+
+**Solutions**:
+
+1. **Check if your kernel is tracked**:
+   - The repository automatically tracks Aurora and Bazzite kernel versions
+   - Check `.external_versions` file in the repository to see tracked versions
+
+2. **Wait for automatic build**:
+   - The repository checks for kernel updates daily
+   - New kmod packages are built automatically when kernel updates are detected
+   - Check the [Actions tab](https://github.com/abirkel/maccel-rpm/actions) for build status
+
+3. **Request a manual build**:
+   - Open an issue requesting a build for your specific kernel version
+   - Include your kernel version (`uname -r`) and distribution (Aurora/Bazzite)
+
+4. **Build locally** (temporary workaround):
+   - See [BUILDING.md](BUILDING.md) for instructions on building packages locally
+   - You can build a kmod package for your specific kernel version

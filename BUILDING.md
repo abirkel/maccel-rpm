@@ -4,45 +4,42 @@ This guide covers how to build the maccel RPM packages locally on your system.
 
 ## Container Requirements (GitHub Actions)
 
-The automated build workflows use containers to ensure consistent builds. **Important**: kmod builds require a full OS container with kernel development tools installed.
+The automated build workflows use containers to ensure consistent builds. The workflow dynamically fetches kernel-devel packages based on the kernel type being built.
 
-### Why Full OS Images are Required for kmod
+### Kernel-devel Package Sources
 
-This workflow is designed to build kmod packages for uBlue atomic images against the kernel-devel packages installed in those images. uBlue images often ship with kernels slightly behind Fedora main, and the corresponding kernel-devel packages are no longer available in the standard Fedora repositories. The only way to get these older kernel-devel packages is from the images themselves.
+**Main kernel type**:
+- Downloads kernel-devel from Fedora Koji repositories
+- URL: `https://kojipkgs.fedoraproject.org/packages/kernel/`
+- Used for Aurora and standard Fedora distributions
 
-**Current Limitation**: The workflow does not yet support building kmod against the latest Fedora kernel from repositories. It only builds against the kernel-devel found in the container image.
+**Bazzite kernel type**:
+- Downloads kernel-devel from Bazzite kernel repository
+- Used for Bazzite gaming distribution
 
 ### Container Image Selection
 
-**For kmod builds** (building pre-compiled kernel modules):
-- **Required**: Full OS container with kernel-devel installed
-- **Recommended**: `ghcr.io/ublue-os/aurora-nvidia-open` (uBlue Aurora with kernel-devel)
-- **Why**: Contains the kernel-devel package matching the image's kernel version
-- **Not suitable**: Minimal containers like `fedora:minimal` (missing kernel-devel)
+The container image should have basic build tools installed. The workflow installs kernel-devel packages dynamically during the build process.
 
-**For akmod + CLI only** (no kmod):
-- **Flexible**: Can use smaller Fedora tooling images
-- **Example**: `fedora:latest` or `fedora:40`
-- **Benefit**: Faster builds, smaller image size
-- **Note**: akmod packages are kernel-agnostic and rebuild on user systems
+**Recommended images**:
+- `ghcr.io/ublue-os/aurora:latest` - Aurora base image
+- `quay.io/fedora/fedora:latest` - Standard Fedora
+- `fedora:43` - Specific Fedora version
 
 ### Configuration
 
 The container image is configured in `build.conf` at the repository root:
 
 ```bash
-# For kmod builds (requires full OS with kernel-devel)
-CONTAINER_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
+CONTAINER_IMAGE=ghcr.io/ublue-os/aurora
 CONTAINER_VERSION=latest
-ENABLE_KMOD=true
-
-# For akmod + CLI only (can use minimal image)
-# CONTAINER_IMAGE=fedora
-# CONTAINER_VERSION=latest
-# ENABLE_KMOD=false
+DEFAULT_KERNEL_TYPE=main
 ```
 
-To disable kmod builds entirely and use a smaller image, set `ENABLE_KMOD=false`.
+**Configuration Options**:
+- `CONTAINER_IMAGE`: Default container image for builds
+- `CONTAINER_VERSION`: Container image tag/version
+- `DEFAULT_KERNEL_TYPE`: Default kernel type (main or bazzite)
 
 ## Prerequisites
 
@@ -50,13 +47,13 @@ Install the required build dependencies:
 
 ```bash
 # Install build dependencies
-sudo dnf install rpm-build rpmdevtools rpmlint akmods kmodtool \
+sudo dnf install rpm-build rpmdevtools rpmlint \
                  kernel-devel gcc make rust cargo git wget
 ```
 
 ## Build Process
 
-Follow these steps to build the packages:
+Follow these steps to build the packages locally:
 
 ```bash
 # Clone this repository
@@ -66,52 +63,61 @@ cd maccel-rpm
 # Set up RPM build tree
 rpmdev-setuptree
 
-# Copy spec files to see what version they specify
+# Copy spec files
 cp specs/*.spec ~/rpmbuild/SPECS/
 cd ~/rpmbuild/SPECS
 
-# Check the version in the spec file
-grep "^Version:" maccel.spec
+# Set version variables
+MACCEL_VERSION="0.5.6"  # Without 'v' prefix
+KERNEL_VERSION=$(uname -r)
+RELEASE_NUMBER="1"
 
-# Download the maccel source (spectool reads from spec file)
-spectool -g -R akmod-maccel.spec
+# Download the maccel source
+spectool -g -R maccel-kmod.spec
 spectool -g -R maccel.spec
 
-# Build the akmod package (generates kmod spec automatically)
-rpmbuild -ba akmod-maccel.spec
+# Build the kmod package
+rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
+         --define "version ${MACCEL_VERSION}" \
+         --define "release ${RELEASE_NUMBER}" \
+         -ba maccel-kmod.spec
 
 # Build the CLI package
-rpmbuild -ba maccel.spec
+rpmbuild --define "version ${MACCEL_VERSION}" \
+         --define "release ${RELEASE_NUMBER}" \
+         -ba maccel.spec
 
 # Find built packages
 ls -l ~/rpmbuild/RPMS/x86_64/
 ls -l ~/rpmbuild/SRPMS/
 ```
 
-**Note**: The spec files contain the version to build. To build a different version, edit the `Version:` field in the spec files before running spectool and rpmbuild.
+**Note**: The spec files use RPM macros for version and release numbers. You must pass these values via `--define` parameters to rpmbuild.
 
-### Building kmod Packages from Generated Spec
+### Building for Different Kernel Versions
 
-The akmod build process generates a kmod spec file using kmodtool. To build pre-compiled kmod packages:
+To build kmod packages for a specific kernel version:
 
 ```bash
-# After building akmod, locate the generated kmod spec
-KMOD_SPEC=$(find ~/rpmbuild/BUILD/maccel-* -name "kmod-maccel.spec" | head -1)
+# Install kernel-devel for target kernel
+sudo dnf install kernel-devel-6.17.8-300.fc43.x86_64
 
-# Copy generated spec to SPECS directory
-cp "$KMOD_SPEC" ~/rpmbuild/SPECS/
+# Set the kernel version
+KERNEL_VERSION="6.17.8-300.fc43.x86_64"
+MACCEL_VERSION="0.5.6"
+RELEASE_NUMBER="1"
 
-# Get your kernel version
-KVER=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
-
-# Build kmod package for your kernel
-rpmbuild --define "kernels $KVER" -ba ~/rpmbuild/SPECS/kmod-maccel.spec
+# Build kmod for that kernel
+rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
+         --define "version ${MACCEL_VERSION}" \
+         --define "release ${RELEASE_NUMBER}" \
+         -ba ~/rpmbuild/SPECS/maccel-kmod.spec
 
 # Find built kmod packages
 ls -l ~/rpmbuild/RPMS/x86_64/kmod-maccel*
 ```
 
-**Important**: The kmod spec is generated by kmodtool during the akmod build. Do not handcraft kmod spec files - always use the generated version to ensure proper RPMFusion compatibility, weak modules support, and ABI tracking.
+**Package Naming**: The kmod package will be named `kmod-maccel-{version}-{release}.{kernel_version}.rpm`, ensuring it's specific to that kernel version.
 
 ## Installing Local Builds
 
@@ -119,7 +125,7 @@ Once the packages are built, you can install them:
 
 ```bash
 # Install the locally built packages
-sudo dnf install ~/rpmbuild/RPMS/x86_64/akmod-maccel-*.rpm
+sudo dnf install ~/rpmbuild/RPMS/x86_64/kmod-maccel-*.rpm
 sudo dnf install ~/rpmbuild/RPMS/x86_64/maccel-*.rpm
 ```
 
@@ -127,16 +133,30 @@ sudo dnf install ~/rpmbuild/RPMS/x86_64/maccel-*.rpm
 
 The spec files are located in the `specs/` directory:
 
-- `specs/akmod-maccel.spec` - Kernel module package
+- `specs/maccel-kmod.spec` - Kernel module package
 - `specs/maccel.spec` - CLI tool package
 
-After making changes to the spec files, copy them to your RPM build tree and rebuild:
+The spec files use RPM macros for version and release numbers:
+```spec
+Version:        %{?version}%{!?version:0.5.6}
+Release:        %{?release}%{!?release:1}%{?dist}
+```
+
+After making changes to the spec files, copy them to your RPM build tree and rebuild with appropriate macros:
 
 ```bash
 cp specs/*.spec ~/rpmbuild/SPECS/
 cd ~/rpmbuild/SPECS
-rpmbuild -ba akmod-maccel.spec
-rpmbuild -ba maccel.spec
+
+# Build with version/release macros
+rpmbuild --define "version 0.5.6" \
+         --define "release 1" \
+         --define "kernel_version $(uname -r)" \
+         -ba maccel-kmod.spec
+
+rpmbuild --define "version 0.5.6" \
+         --define "release 1" \
+         -ba maccel.spec
 ```
 
 ## Linting
@@ -149,55 +169,42 @@ rpmlint specs/*.spec
 
 ## Troubleshooting
 
-### kmodtool Issues
+### Build Failures
 
-**kmodtool not found during build**
+**Missing kernel-devel**
 ```bash
-# Install kmodtool package
-sudo dnf install kmodtool
+# Install kernel-devel for your kernel
+sudo dnf install kernel-devel-$(uname -r)
 
-# Verify installation
-which kmodtool
-```
-
-**Generated kmod spec not found**
-```bash
-# Check if akmod build completed successfully
-ls -la ~/rpmbuild/BUILD/maccel-*/
-
-# Look for generated spec
-find ~/rpmbuild/BUILD -name "kmod-maccel.spec"
-
-# If not found, check build logs for kmodtool errors
-less ~/rpmbuild/BUILD/maccel-*/build.log
-```
-
-**kmod build fails with kernel version mismatch**
-```bash
-# Ensure kernel-devel is installed
-sudo dnf install kernel-devel
+# Or for a specific kernel version
+sudo dnf install kernel-devel-6.17.8-300.fc43.x86_64
 
 # Check available kernel-devel versions
-rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n'
-
-# Use exact kernel version when building
-KVER=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}\n' | head -1)
-rpmbuild --define "kernels $KVER" -ba ~/rpmbuild/SPECS/kmod-maccel.spec
+dnf list available kernel-devel
 ```
 
-**akmod package doesn't rebuild module on kernel update**
+**RPM macro errors**
 ```bash
-# Verify akmod source is installed correctly
-ls -la /usr/src/akmods/maccel-*/
+# Ensure you're passing all required macros
+rpmbuild --define "kernel_version $(uname -r)" \
+         --define "version 0.5.6" \
+         --define "release 1" \
+         -ba maccel-kmod.spec
 
-# Check that generated kmod spec is present
-ls -la /usr/src/akmods/maccel-*/kmod-maccel.spec
+# Check spec file for required macros
+grep -E "%(version|release|kernel_version)" specs/maccel-kmod.spec
+```
 
-# Manually trigger akmods rebuild
-sudo akmods --force
+**Compilation errors**
+```bash
+# Check build logs
+less ~/rpmbuild/BUILD/maccel-*/build.log
 
-# Check akmods logs
-sudo journalctl -u akmods
+# Verify kernel-devel matches your kernel
+rpm -q kernel-devel
+
+# Ensure build dependencies are installed
+sudo dnf builddep specs/maccel-kmod.spec
 ```
 
 **Module fails to load after installation**
@@ -210,6 +217,27 @@ sudo modprobe -v maccel
 
 # Check kernel logs for errors
 sudo dmesg | grep maccel
+
+# Verify module signature (if secure boot enabled)
+modinfo maccel | grep signature
+```
+
+### Version Mismatch Issues
+
+**kmod package doesn't match running kernel**
+```bash
+# Check your kernel version
+uname -r
+
+# Build kmod for your specific kernel
+KERNEL_VERSION=$(uname -r)
+rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
+         --define "version 0.5.6" \
+         --define "release 1" \
+         -ba maccel-kmod.spec
+
+# Install the matching package
+sudo dnf install ~/rpmbuild/RPMS/x86_64/kmod-maccel-*$(uname -r)*.rpm
 ```
 
 

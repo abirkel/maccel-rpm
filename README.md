@@ -8,11 +8,13 @@ RPM packages for the [maccel](https://github.com/Gnarus-G/maccel) mouse accelera
 
 ## Overview
 
-This repository provides automated RPM packaging for maccel, a mouse acceleration driver consisting of a kernel module and CLI tool. Packages are built automatically via GitHub Actions when new maccel releases are detected.
+This repository provides automated RPM packaging for maccel, a mouse acceleration driver consisting of a kernel module and CLI tool. Packages are built automatically via GitHub Actions when new maccel releases or kernel updates are detected.
 
 ## Packages
 
-- **akmod-maccel**: Automatic kernel module package that rebuilds for new kernels using akmods
+- **kmod-maccel**: Pre-compiled kernel module packages for specific kernel versions
+  - Built for both Aurora (main kernel) and Bazzite (custom kernel) distributions
+  - Automatically rebuilt when kernel versions change
 - **maccel**: CLI tool for configuring mouse acceleration parameters
 
 ## Installation
@@ -36,11 +38,11 @@ The GPG public key will be automatically imported when you first install a packa
 Install maccel and its dependencies:
 
 ```bash
-# Install maccel (automatically installs akmod-maccel as a dependency)
+# Install maccel (automatically installs kmod-maccel as a dependency)
 sudo dnf install maccel
 ```
 
-The `maccel` package will automatically pull in `akmod-maccel`, which provides the kernel module. The akmod system will build the kernel module for your current kernel during installation.
+The `maccel` package will automatically pull in the appropriate `kmod-maccel` package for your kernel version. The kmod package is pre-compiled for your specific kernel, so installation is fast and doesn't require compilation.
 
 ### Post-Installation
 
@@ -103,9 +105,14 @@ For additional help, see the [upstream maccel issues](https://github.com/Gnarus-
 
 ## Automated Builds
 
-This repository automatically builds and publishes RPM packages when new maccel releases are detected. Packages are built daily and deployed to the GitHub Pages repository.
+This repository automatically builds and publishes RPM packages when:
+- New maccel releases are detected
+- Aurora kernel version changes
+- Bazzite kernel version changes
 
-For detailed information about the build workflow architecture, manual build options, and configuration, see the [Workflows Guide](WORKFLOWS.md).
+The workflow monitors both Aurora and Bazzite images daily and builds kmod packages for the appropriate kernel types. Packages are deployed to the GitHub Pages repository.
+
+For detailed information about the build workflow architecture, kernel types, manual build options, and configuration, see the [Workflows Guide](WORKFLOWS.md).
 
 ## Building Locally
 
