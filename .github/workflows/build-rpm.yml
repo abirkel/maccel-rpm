@@ -382,25 +382,6 @@ jobs:
           rpmlint ~/rpmbuild/RPMS/x86_64/*.rpm || true
         continue-on-error: true
 
-      - name: Setup GPG for signing
-        run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d > private.key
-          gpg --batch --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
-            --import private.key
-          echo -e "5\ny\n" | gpg --batch --command-fd 0 \
-            --edit-key "${{ secrets.GPG_KEY_ID }}" trust
-          rm private.key
-
-      - name: Sign RPM packages
-        run: |
-          echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
-          echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
-          echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes \
-            --pinentry-mode loopback --passphrase \
-            '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
-          cd ~/rpmbuild/RPMS/x86_64
-          rpm --addsign *.rpm
-
       - name: Prepare release packages
         run: |
           set -euo pipefail
@@ -459,6 +440,47 @@ jobs:
           echo "Downloaded packages:"
           ls -lh artifacts/
 
+      - name: Install RPM signing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm gnupg2
+
+      - name: Setup GPG for signing
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d > private.key
+          gpg --batch --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            --import private.key
+          echo -e "5\ny\n" | gpg --batch --command-fd 0 \
+            --edit-key "${{ secrets.GPG_KEY_ID }}" trust
+          rm private.key
+
+      - name: Sign all RPM packages
+        run: |
+          echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
+          echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
+          echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes \
+            --pinentry-mode loopback --passphrase \
+            '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
+
+          # Sign all RPM packages
+          cd artifacts
+          for rpm in *.rpm; do
+            if [ -f "$rpm" ]; then
+              echo "Signing $rpm"
+              rpm --addsign "$rpm"
+            fi
+          done
+
+      - name: Verify package signatures
+        run: |
+          cd artifacts
+          for rpm in *.rpm; do
+            if [ -f "$rpm" ]; then
+              echo "Verifying signature for $rpm"
+              rpm --checksig "$rpm"
+            fi
+          done
+
       - name: Prepare release notes
         id: release_notes
         run: |
@@ -489,37 +511,58 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Create release with packages
+      - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ needs.resolve-versions.outputs.maccel_version }}
-          files: artifacts/*
+          files: artifacts/*.rpm
           body: ${{ steps.release_notes.outputs.notes }}
+          fail_on_unmatched_files: false
+          # This will update existing release if it exists
 
       - name: Prepare merged repository
         run: |
+          set -euo pipefail
+
           # Install createrepo_c for metadata generation
           sudo apt-get update
           sudo apt-get install -y createrepo-c
 
           # Clone existing gh-pages branch to get current packages
+          echo "Cloning existing gh-pages branch..."
           git clone --depth=1 --branch=gh-pages \
             https://github.com/${{ github.repository }}.git gh-pages-repo \
             || mkdir -p gh-pages-repo
 
-          # Prepare repo with existing + new packages
+          # Prepare repo directory with existing + new packages
           mkdir -p repo
-          # Copy only RPM files from existing repo (not directories/metadata)
-          find gh-pages-repo -maxdepth 1 -name "*.rpm" \
-            -exec cp {} repo/ \; 2>/dev/null || true
+
+          # Copy existing RPM files from gh-pages (if any)
+          if [ -d "gh-pages-repo" ]; then
+            echo "Copying existing packages from gh-pages..."
+            find gh-pages-repo -maxdepth 1 -name "*.rpm" \
+              -exec cp {} repo/ \; 2>/dev/null || true
+          fi
+
+          # Copy new signed packages
+          echo "Copying new signed packages..."
           cp artifacts/*.rpm repo/ 2>/dev/null || true
 
+          # List all packages in repo
+          echo "Packages in repository:"
+          ls -lh repo/*.rpm 2>/dev/null || echo "No packages found"
+
           # Regenerate metadata for ALL packages
+          echo "Regenerating repository metadata..."
           createrepo_c repo/
 
-      - name: Deploy repo to GitHub Pages
+          echo "Repository preparation complete"
+
+      - name: Deploy repository to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: repo
-          keep_files: true
+          keep_files: false
+          # keep_files: false ensures clean deployment
+          # All packages are in repo/ so nothing is lost
