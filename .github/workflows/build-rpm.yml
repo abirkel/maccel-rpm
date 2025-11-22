@@ -4,23 +4,26 @@ name: Build and Publish RPM Packages
 'on':
   workflow_dispatch:
     inputs:
+      kernel_type:
+        description: 'Kernel type: main (Aurora) or bazzite'
+        required: false
+        type: choice
+        options:
+          - main
+          - bazzite
+        default: main
+      kernel_version:
+        description: 'Specific kernel version (leave empty for latest)'
+        required: false
+        type: string
+        default: ''
       maccel_version:
         description: 'Maccel version to build (e.g., v0.5.6)'
         required: false
         type: string
         default: ''
-      update_specs:
-        description: 'Update spec files with new version and release'
-        required: false
-        type: boolean
-        default: false
-      force_rebuild:
-        description: 'Force rebuild even if version unchanged'
-        required: false
-        type: boolean
-        default: false
       build_kmod:
-        description: 'Build kmod package (kernel module for specific kernel version)'
+        description: 'Build kmod package'
         required: false
         type: boolean
         default: true
@@ -30,14 +33,14 @@ name: Build and Publish RPM Packages
         type: boolean
         default: true
       container_image:
-        description: |
-          Container image to use (leave empty to use build.conf default)
-          (e.g., fedora, ghcr.io/ublue-os/aurora-nvidia-open)
+        description: >-
+          Container image for build (leave empty to use build.conf default)
         required: false
         type: string
         default: ''
       fedora_version:
-        description: 'Fedora version to use (leave empty to use build.conf default)'
+        description: >-
+          Fedora version (leave empty to use build.conf default)
         required: false
         type: string
         default: ''
@@ -71,142 +74,132 @@ jobs:
           echo "container_image=$FINAL_IMAGE" >> $GITHUB_OUTPUT
           echo "container_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
 
-  update-specs:
+  resolve-versions:
     runs-on: ubuntu-latest
-    if: github.event.inputs.update_specs == 'true'
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      commit_sha: ${{ steps.commit.outputs.sha }}
+      kernel_version: ${{ steps.resolve.outputs.kernel_version }}
+      maccel_version: ${{ steps.maccel.outputs.maccel_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo jq
 
       - name: Determine maccel version
-        id: version
+        id: maccel
         run: |
           # Use workflow input if provided, otherwise read from file
           INPUT_VERSION="${{ github.event.inputs.maccel_version }}"
           if [ -n "$INPUT_VERSION" ]; then
-            echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
-            echo "Using version from workflow input: $INPUT_VERSION"
+            echo "maccel_version=$INPUT_VERSION" >> $GITHUB_OUTPUT
+            echo "Using maccel version from workflow input: $INPUT_VERSION"
           elif [ -f .external_versions ]; then
             source .external_versions
-            echo "version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
-            echo "Using version from .external_versions: $MACCEL_VERSION"
+            echo "maccel_version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
+            echo "Using maccel version from .external_versions: $MACCEL_VERSION"
           else
-            echo "ERROR: No version specified and .external_versions not found"
-            echo "Please provide maccel_version input or ensure .external_versions exists"
+            echo "ERROR: No maccel version specified"
+            echo "and .external_versions not found"
+            echo "Provide maccel_version input or ensure"
+            echo ".external_versions exists"
             exit 1
           fi
 
-      - name: Update spec files with new version and release
+      - name: Resolve kernel version
+        id: resolve
         run: |
-          set -euo pipefail
-          VERSION=${{ steps.version.outputs.version }}
-          VERSION_NUM=${VERSION#v}
-          CHANGELOG_DATE=$(LC_ALL=C date "+%a %b %d %Y")
-          MAINTAINER="github-actions[bot] \
-            <github-actions[bot]@users.noreply.github.com>"
+          KERNEL_TYPE="${{ github.event.inputs.kernel_type }}"
+          EXPLICIT_VERSION="${{ github.event.inputs.kernel_version }}"
 
-          for spec in specs/*.spec; do
-            if [ ! -f "$spec" ]; then
-              echo "ERROR: Spec file not found: $spec"
-              exit 1
-            fi
-            if ! grep -q "^Version:" "$spec"; then
-              echo "ERROR: Version field not found in $spec"
-              exit 1
-            fi
-            if ! grep -q "^Release:" "$spec"; then
-              echo "ERROR: Release field not found in $spec"
-              exit 1
-            fi
+          # Make script executable
+          chmod +x scripts/resolve-kernel-version.sh
 
-            # Extract current version and release from spec file
-            CURRENT_VERSION=$(grep "^Version:" "$spec" | awk '{print $NF}')
-            CURRENT_RELEASE=$(grep "^Release:" "$spec" | \
-              awk '{print $NF}' | sed 's/%{?dist}//')
+          # Resolve kernel version
+          if [ -n "$EXPLICIT_VERSION" ]; then
+            KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
+              --kernel-type "$KERNEL_TYPE" \
+              --version "$EXPLICIT_VERSION")
+          else
+            KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
+              --kernel-type "$KERNEL_TYPE")
+          fi
 
-            # Determine new release number
-            if [ "$CURRENT_VERSION" = "$VERSION_NUM" ]; then
-              # Same version, increment release
-              NEW_RELEASE=$((CURRENT_RELEASE + 1))
-              CHANGELOG_MSG="- Rebuild for kernel compatibility"
-            else
-              # New version, reset release to 1
-              NEW_RELEASE=1
-              CHANGELOG_MSG="- Update to maccel version ${VERSION_NUM}"
-            fi
-
-            # Update Version field
-            sed -i "s/^Version:.*/Version:        ${VERSION_NUM}/" "$spec"
-
-            # Update Release field
-            sed -i "s/^Release:.*/Release:        ${NEW_RELEASE}%{?dist}/" \
-              "$spec"
-
-            # Insert changelog entry after %changelog line
-            ENTRY="* ${CHANGELOG_DATE} ${MAINTAINER} - "
-            ENTRY="${ENTRY}${VERSION_NUM}-${NEW_RELEASE}"
-            ENTRY="${ENTRY}\\n${CHANGELOG_MSG}"
-            sed -i "/^%changelog$/a\\${ENTRY}" "$spec"
-          done
-
-      - name: Commit updated spec files
-        id: commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add specs/*.spec
-          git commit -m "chore: update spec files to version ${{ steps.version.outputs.version }}" && git push
-          
-          # Capture the commit SHA
-          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "Resolved kernel version: $KERNEL_VERSION"
 
   build-rpm:
-    needs: [load-config, update-specs]
-    if: always() && needs.load-config.result == 'success'
+    needs: [load-config, resolve-versions]
     runs-on: ubuntu-latest
     container:
-      image: ${{ needs.load-config.outputs.container_image }}:${{ needs.load-config.outputs.container_version }}
+      image: >-
+        ${{ needs.load-config.outputs.container_image }}:${{
+        needs.load-config.outputs.container_version }}
     outputs:
-      container_image: ${{ needs.load-config.outputs.container_image }}
-      container_version: ${{ needs.load-config.outputs.container_version }}
-      version: ${{ steps.get_version.outputs.version }}
+      maccel_version: >-
+        ${{ needs.resolve-versions.outputs.maccel_version }}
+      kernel_version: >-
+        ${{ needs.resolve-versions.outputs.kernel_version }}
+      kernel_type: ${{ github.event.inputs.kernel_type }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.update-specs.outputs.commit_sha || github.ref_name }}
-
-      - name: Get version from spec
-        id: get_version
-        run: |
-          VERSION=$(grep "^Version:" specs/maccel.spec | awk '{print $NF}')
-          echo "version=v${VERSION}" >> $GITHUB_OUTPUT
-          echo "Detected version from spec: v${VERSION}"
 
       - name: Install build dependencies
         run: |
           # Step 1: Install base RPM build tools
           dnf install -y rpm-build rpmdevtools rpmlint createrepo_c \
-            rpm-sign gnupg2 pinentry spectool kmodtool
+            rpm-sign gnupg2 pinentry spectool kmodtool curl jq
 
           # Step 2: Install BuildRequires from spec files
           dnf builddep -y specs/*.spec
 
-      - name: Verify kmodtool availability
-        run: |
-          if ! command -v kmodtool &> /dev/null; then
-            echo "ERROR: kmodtool not found in PATH"
-            exit 1
-          fi
-          echo "kmodtool is available at: $(which kmodtool)"
-
       - name: Setup RPM build tree
         run: rpmdev-setuptree
+
+      - name: Fetch kernel-devel packages
+        if: github.event.inputs.build_kmod == 'true'
+        run: |
+          KERNEL_VERSION="${{ needs.resolve-versions.outputs.kernel_version }}"
+          KERNEL_TYPE="${{ github.event.inputs.kernel_type }}"
+          FEDORA_VERSION="${{ needs.load-config.outputs.container_version }}"
+
+          # Make script executable
+          chmod +x scripts/fetch-kernel-packages.sh
+
+          # Fetch kernel packages
+          ./scripts/fetch-kernel-packages.sh \
+            --kernel-version "$KERNEL_VERSION" \
+            --kernel-type "$KERNEL_TYPE" \
+            --fedora-version "$FEDORA_VERSION" \
+            --output-dir ~/kernel-packages
+
+      - name: Install kernel-devel
+        if: github.event.inputs.build_kmod == 'true'
+        run: |
+          dnf install -y ~/kernel-packages/kernel-devel*.rpm
+
+      - name: Determine release number
+        id: release
+        run: |
+          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
+          KERNEL_VERSION="${{ needs.resolve-versions.outputs.kernel_version }}"
+          KERNEL_TYPE="${{ github.event.inputs.kernel_type }}"
+
+          # Make script executable
+          chmod +x scripts/determine-release-number.sh
+
+          # Determine release number
+          RELEASE_NUMBER=$(./scripts/determine-release-number.sh \
+            --maccel-version "$MACCEL_VERSION" \
+            --kernel-version "$KERNEL_VERSION" \
+            --kernel-type "$KERNEL_TYPE" \
+            --repo "${{ github.repository }}")
+
+          echo "release_number=$RELEASE_NUMBER" >> $GITHUB_OUTPUT
+          echo "Determined release number: $RELEASE_NUMBER"
 
       - name: Download maccel source
         run: |
@@ -222,26 +215,42 @@ jobs:
         if: github.event.inputs.build_kmod == 'true'
         run: |
           cd ~/rpmbuild/SPECS
-          
-          # Get kernel version from installed kernel-devel package
-          KERNEL_VERSION=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}')
-          echo "Building kmod for kernel version: $KERNEL_VERSION"
-          
-          VERSION=$(grep "^Version:" maccel-kmod.spec | awk '{print $NF}')
-          RELEASE=$(grep "^Release:" maccel-kmod.spec | awk '{print $NF}' | sed 's/%{?dist}//')
-          
+
+          KERNEL_VERSION="${{ needs.resolve-versions.outputs.kernel_version }}"
+          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
+          RELEASE_NUMBER="${{ steps.release.outputs.release_number }}"
+
+          # Strip 'v' prefix from version if present
+          VERSION="${MACCEL_VERSION#v}"
+
+          echo "Building kmod for:"
+          echo "  Kernel version: $KERNEL_VERSION"
+          echo "  Maccel version: $VERSION"
+          echo "  Release number: $RELEASE_NUMBER"
+
           rpmbuild --define "kernel_version ${KERNEL_VERSION}" \
                    --define "version ${VERSION}" \
-                   --define "release ${RELEASE}" \
+                   --define "release ${RELEASE_NUMBER}" \
                    -ba maccel-kmod.spec
 
       - name: Build maccel CLI
         if: github.event.inputs.build_cli == 'true'
         run: |
           cd ~/rpmbuild/SPECS
-          VERSION=$(grep "^Version:" maccel.spec | awk '{print $NF}')
-          RELEASE=$(grep "^Release:" maccel.spec | awk '{print $NF}' | sed 's/%{?dist}//')
-          rpmbuild --define "version ${VERSION}" --define "release ${RELEASE}" -ba maccel.spec
+
+          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
+          RELEASE_NUMBER="${{ steps.release.outputs.release_number }}"
+
+          # Strip 'v' prefix from version if present
+          VERSION="${MACCEL_VERSION#v}"
+
+          echo "Building CLI for:"
+          echo "  Maccel version: $VERSION"
+          echo "  Release number: $RELEASE_NUMBER"
+
+          rpmbuild --define "version ${VERSION}" \
+                   --define "release ${RELEASE_NUMBER}" \
+                   -ba maccel.spec
 
       - name: Lint packages
         run: |
@@ -303,9 +312,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rpm-packages
-          path: |
-            release-packages/
-            repo/
+          path: release-packages/
 
   publish:
     needs: build-rpm
@@ -320,19 +327,23 @@ jobs:
           name: rpm-packages
           path: artifacts/
 
-
-
       - name: Prepare release notes
         id: release_notes
         run: |
-          VER="${{ needs.build-rpm.outputs.version }}"
+          VER="${{ needs.build-rpm.outputs.maccel_version }}"
+          KERNEL_VER="${{ needs.build-rpm.outputs.kernel_version }}"
+          KERNEL_TYPE="${{ needs.build-rpm.outputs.kernel_type }}"
           REPO="${{ github.repository }}"
 
           {
             echo "notes<<EOF"
             echo "RPM packages for maccel **$VER**"
             echo ""
-            echo "> **Note:** The kmod package is built for a specific kernel version"
+            echo "**Kernel Type:** $KERNEL_TYPE"
+            echo "**Kernel Version:** $KERNEL_VER"
+            echo ""
+            echo "> **Note:** The kmod package is built for a"
+            echo "> specific kernel version"
             echo ""
             echo "## Installation"
             echo "\`\`\`bash"
@@ -349,8 +360,8 @@ jobs:
       - name: Create release with packages
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ needs.build-rpm.outputs.version }}
-          files: artifacts/release-packages/*
+          tag_name: build-${{ needs.build-rpm.outputs.maccel_version }}
+          files: artifacts/*
           body: ${{ steps.release_notes.outputs.notes }}
 
       - name: Prepare merged repository
@@ -369,7 +380,7 @@ jobs:
           # Copy only RPM files from existing repo (not directories/metadata)
           find gh-pages-repo -maxdepth 1 -name "*.rpm" \
             -exec cp {} repo/ \; 2>/dev/null || true
-          cp artifacts/release-packages/*.rpm repo/ 2>/dev/null || true
+          cp artifacts/*.rpm repo/ 2>/dev/null || true
 
           # Regenerate metadata for ALL packages
           createrepo_c repo/
@@ -380,25 +391,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: repo
           keep_files: true
-
-  cleanup-on-failure:
-    needs: [update-specs, build-rpm, publish]
-    runs-on: ubuntu-latest
-    if: failure() && needs.update-specs.result == 'success'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
-
-      - name: Revert spec update commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          COMMIT_SHA="${{ needs.update-specs.outputs.commit_sha }}"
-          echo "Reverting commit: $COMMIT_SHA"
-          
-          git revert $COMMIT_SHA --no-edit
-          git push
-          echo "Successfully reverted spec update due to build/publish failure"
