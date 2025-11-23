@@ -919,6 +919,9 @@ jobs:
           set -euo pipefail
           echo "::group::Preparing merged repository"
 
+          # Install git for gh-pages action
+          dnf install -y git
+
           # Install createrepo_c for metadata generation (already installed in container)
           # createrepo_c is already available in the Fedora container
 
