@@ -736,15 +736,11 @@ jobs:
           WRAPPER_EOF
           chmod +x /tmp/gpg-sign-wrapper.sh
 
-          # Configure RPM to use wrapper script with full signing command
+          # Configure RPM to use wrapper script
           cat > ~/.rpmmacros << 'EOF'
           %_signature gpg
           %_gpg_name ${{ secrets.GPG_KEY_ID }}
           %__gpg /tmp/gpg-sign-wrapper.sh
-          %__gpg_sign_cmd %{__gpg} \
-              --no-verbose --no-armor \
-              -u "%{_gpg_name}" -sbo %{__signature_filename} \
-              --digest-algo sha256 %{__plaintext_filename}
           EOF
 
           # Export passphrase for wrapper script
