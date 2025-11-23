@@ -791,15 +791,31 @@ jobs:
           echo "RPM macros configured:"
           cat ~/.rpmmacros
 
-          # Start GPG agent with preset passphrase
-          eval $(gpg-agent --daemon --allow-preset-passphrase)
+          # Start GPG agent with preset passphrase capability
+          eval $(gpg-agent --daemon --allow-preset-passphrase --max-cache-ttl 3600)
           
-          # Get the keygrip for preset
-          KEYGRIP=$(gpg --with-keygrip --list-secret-keys "${{ secrets.GPG_KEY_ID }}" | grep -A 1 "^sec" | tail -1 | awk '{print $3}')
+          # Get the keygrip for the signing key
+          echo "Getting keygrip..."
+          gpg --with-keygrip --list-secret-keys "${{ secrets.GPG_KEY_ID }}"
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys "${{ secrets.GPG_KEY_ID }}" | grep "Keygrip" | head -1 | awk '{print $3}')
           echo "Keygrip: $KEYGRIP"
           
+          if [ -z "$KEYGRIP" ]; then
+            echo "::error::Failed to get keygrip"
+            exit 1
+          fi
+          
+          # Find gpg-preset-passphrase
+          PRESET_CMD=$(find /usr -name "gpg-preset-passphrase" 2>/dev/null | head -1)
+          if [ -z "$PRESET_CMD" ]; then
+            echo "::error::gpg-preset-passphrase not found"
+            exit 1
+          fi
+          echo "Using: $PRESET_CMD"
+          
           # Preset the passphrase
-          echo "$GPG_PASSPHRASE" | /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP"
+          echo "$GPG_PASSPHRASE" | "$PRESET_CMD" --preset "$KEYGRIP"
+          echo "✓ Passphrase preset in GPG agent"
 
           # Sign all RPM packages using rpm --addsign (should use agent now)
           cd artifacts
