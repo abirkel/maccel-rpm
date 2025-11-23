@@ -759,16 +759,24 @@ jobs:
           echo "RPM macros configured:"
           cat ~/.rpmmacros
 
-          # Sign all RPM packages
+          # Sign all RPM packages using rpmsign directly
           cd artifacts
           SIGN_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              if ! rpm --addsign "$rpm" 2>&1; then
+              # Use rpmsign with explicit key and passphrase
+              if ! echo "$GPG_PASSPHRASE" | rpmsign --addsign \
+                --key-id="${{ secrets.GPG_KEY_ID }}" \
+                --digest-algo=sha256 \
+                "$rpm" 2>&1; then
                 echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
               fi
+              
+              # Verify signature immediately after signing
+              echo "Checking signature on $rpm..."
+              rpm --checksig "$rpm" || true
             fi
           done
 
