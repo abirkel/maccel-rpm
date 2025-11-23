@@ -313,13 +313,15 @@ jobs:
             rpm-sign gnupg2 pinentry spectool kmodtool curl jq
 
           # Step 2: Install BuildRequires from spec files
-          # For kmod spec, we need to provide a dummy kernel_version
-          # to satisfy the spec file parsing
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+          MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
+          
           for spec in specs/*.spec; do
             if [[ "$spec" == *"kmod"* ]]; then
-              # Provide dummy kernel_version for kmod spec parsing
-              dnf builddep -y --define "kernel_version 6.0.0-0.fc43.x86_64" \
-                --define "version 0.0.0" --define "release 1" "$spec"
+              # Provide actual kernel_version for kmod spec parsing
+              dnf builddep -y --define "kernel_version ${KERNEL_VERSION}" \
+                --define "version ${MACCEL_VERSION#v}" \
+                --define "release 1" "$spec"
             else
               dnf builddep -y "$spec"
             fi
