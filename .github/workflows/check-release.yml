@@ -152,7 +152,13 @@ jobs:
           echo "aurora_kernel=$LATEST_AURORA" >> "$GITHUB_OUTPUT"
           echo "bazzite_kernel=$LATEST_BAZZITE" >> "$GITHUB_OUTPUT"
 
-          if [ "$NEEDS_BUILD" = false ]; then
+          echo ""
+          if [ "$NEEDS_BUILD" = true ]; then
+            echo "=== Build Required ==="
+            echo "Kernel types: $KERNEL_TYPES"
+            echo "Build CLI: $BUILD_CLI"
+            echo "Maccel version: $LATEST_MACCEL"
+          else
             echo "→ No changes detected, no build needed"
           fi
 
