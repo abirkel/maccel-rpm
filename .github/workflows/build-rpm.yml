@@ -670,7 +670,7 @@ jobs:
       - name: Install RPM signing tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm gnupg2
+          sudo apt-get install -y rpm gnupg2 rpmsign
 
       - name: Setup GPG for signing
         run: |
@@ -713,26 +713,51 @@ jobs:
           set -euo pipefail
           echo "::group::Signing RPM packages"
 
+          # Initialize RPM database if needed
+          sudo rpm --initdb || true
+          
           # Export and import public key into RPM database
           gpg --export -a "${{ secrets.GPG_KEY_ID }}" > /tmp/gpg-pubkey.asc
-          sudo rpm --import /tmp/gpg-pubkey.asc
+          if ! sudo rpm --import /tmp/gpg-pubkey.asc 2>&1; then
+            echo "::warning::Failed to import key into RPM database"
+            echo "::warning::Continuing with GPG-only signing"
+          fi
           
           # Verify key is in RPM database
           echo "Keys in RPM database:"
-          rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
+          rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' || echo "No keys in RPM database"
 
           # Configure RPM signing with proper macros
-          cat > ~/.rpmmacros << EOF
+          cat > ~/.rpmmacros << 'MACROS_EOF'
           %_signature gpg
-          %_gpg_path $HOME/.gnupg
           %_gpg_name ${{ secrets.GPG_KEY_ID }}
-          %_gpgbin /usr/bin/gpg
-          %__gpg_sign_cmd %{__gpg} \
-              gpg --force-v3-sigs --batch --verbose --no-armor \
-              --passphrase-fd 3 --no-secmem-warning \
-              -u "%{_gpg_name}" -sbo %{__signature_filename} \
-              --digest-algo sha256 %{__plaintext_filename}
-          EOF
+          %__gpg /usr/bin/gpg
+          MACROS_EOF
+
+          # Create expect script for automated signing
+          cat > /tmp/sign-rpm.exp << 'EXPECT_EOF'
+          #!/usr/bin/expect -f
+          set timeout 30
+          set rpm_file [lindex $argv 0]
+          set passphrase [lindex $argv 1]
+          set key_id [lindex $argv 2]
+          
+          spawn rpm --define "_gpg_name $key_id" --addsign $rpm_file
+          expect {
+            "Enter pass phrase:" {
+              send "$passphrase\r"
+              exp_continue
+            }
+            "Pass phrase is good." {
+              # Success
+            }
+            eof
+          }
+          EXPECT_EOF
+          chmod +x /tmp/sign-rpm.exp
+
+          # Install expect for automated passphrase entry
+          sudo apt-get install -y expect
 
           # Sign all RPM packages with error handling
           cd artifacts
@@ -740,21 +765,9 @@ jobs:
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              if ! echo "${{ secrets.GPG_PASSPHRASE }}" | \
-                  gpg --batch --passphrase-fd 0 --pinentry-mode loopback \
-                  -u "${{ secrets.GPG_KEY_ID }}" --detach-sign --armor \
-                  -o "${rpm}.asc" "$rpm" 2>&1; then
-                echo "::error::Failed to create detached signature for: $rpm"
+              if ! /tmp/sign-rpm.exp "$rpm" "${{ secrets.GPG_PASSPHRASE }}" "${{ secrets.GPG_KEY_ID }}" 2>&1; then
+                echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
-              else
-                # Use rpmsign to add the signature to the RPM
-                if ! rpm --addsign --define "_gpg_name ${{ secrets.GPG_KEY_ID }}" \
-                    --define "__gpg_sign_cmd %{__gpg} gpg --batch --no-verbose --no-armor --passphrase-fd 3 --no-secmem-warning -u %{_gpg_name} -sbo %{__signature_filename} %{__plaintext_filename}" \
-                    "$rpm" 3<<< "${{ secrets.GPG_PASSPHRASE }}" 2>&1; then
-                  echo "::error::Failed to sign package: $rpm"
-                  SIGN_FAILED=1
-                fi
-                rm -f "${rpm}.asc"
               fi
             fi
           done
