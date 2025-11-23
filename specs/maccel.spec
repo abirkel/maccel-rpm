@@ -16,7 +16,7 @@ BuildRequires:  cargo
 BuildRequires:  gcc
 BuildRequires:  make
 
-Requires:       (akmod-maccel or kmod-maccel)
+Requires:       kmod-maccel = %{version}
 Requires:       systemd-udev
 Provides:       maccel-kmod-common = %{version}-%{release}
 

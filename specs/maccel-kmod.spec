@@ -25,6 +25,7 @@ BuildRequires:  gcc
 BuildRequires:  make
 
 Requires:       kernel = %{kernel_version}
+Provides:       kmod-maccel = %{version}-%{release}
 Provides:       %{kmod_name}-kmod = %{version}-%{release}
 
 %description
