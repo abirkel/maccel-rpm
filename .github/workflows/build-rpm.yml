@@ -855,7 +855,7 @@ jobs:
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Verifying signature for $rpm"
-              if ! rpm --checksig "$rpm" 2>&1 | grep -q "pgp.*OK"; then
+              if ! rpm --checksig "$rpm" 2>&1 | grep -qi "OpenPGP.*OK"; then
                 echo "::error::Signature verification failed for: $rpm"
                 rpm --checksig "$rpm" || true
                 VERIFY_FAILED=1
