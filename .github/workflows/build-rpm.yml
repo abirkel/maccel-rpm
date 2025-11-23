@@ -132,6 +132,7 @@ jobs:
           # Build JSON matrix
           MATRIX_JSON='{"include":['
           FIRST=true
+          CLI_ASSIGNED=false  # Track if we've assigned CLI to a kernel type yet
 
           for TYPE in "${TYPES[@]}"; do
             # Trim whitespace
@@ -143,9 +144,10 @@ jobs:
               MATRIX_JSON="$MATRIX_JSON,"
             fi
 
-            # Only main kernel type builds CLI (if build_cli input is true)
-            if [ "$TYPE" = "main" ] && [ "${{ inputs.build_cli }}" = "true" ]; then
+            # Assign CLI build to the first kernel type if build_cli is enabled
+            if [ "${{ inputs.build_cli }}" = "true" ] && [ "$CLI_ASSIGNED" = "false" ]; then
               BUILD_CLI="true"
+              CLI_ASSIGNED=true
             else
               BUILD_CLI="false"
             fi
