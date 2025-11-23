@@ -143,8 +143,8 @@ jobs:
               MATRIX_JSON="$MATRIX_JSON,"
             fi
 
-            # Only main kernel type builds CLI
-            if [ "$TYPE" = "main" ]; then
+            # Only main kernel type builds CLI (if build_cli input is true)
+            if [ "$TYPE" = "main" ] && [ "${{ inputs.build_cli }}" = "true" ]; then
               BUILD_CLI="true"
             else
               BUILD_CLI="false"
