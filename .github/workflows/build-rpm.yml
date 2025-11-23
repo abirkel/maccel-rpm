@@ -716,26 +716,22 @@ jobs:
           set -euo pipefail
           echo "::group::Signing RPM packages"
 
-          # Initialize RPM database if needed
-          sudo rpm --initdb || true
-          
-          # Export and import public key into RPM database
+          # Import public key into RPM database
           gpg --export -a "${{ secrets.GPG_KEY_ID }}" > /tmp/gpg-pubkey.asc
-          if ! sudo rpm --import /tmp/gpg-pubkey.asc 2>&1; then
-            echo "::warning::Failed to import key into RPM database"
-            echo "::warning::Continuing with GPG-only signing"
-          fi
+          rpm --import /tmp/gpg-pubkey.asc
           
           # Verify key is in RPM database
           echo "Keys in RPM database:"
-          rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' || echo "No keys in RPM database"
+          rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
 
-          # Configure RPM signing with proper macros
-          cat > ~/.rpmmacros << 'MACROS_EOF'
+          # Configure RPM signing
+          cat > ~/.rpmmacros << 'EOF'
           %_signature gpg
           %_gpg_name ${{ secrets.GPG_KEY_ID }}
-          %__gpg /usr/bin/gpg
-          MACROS_EOF
+          EOF
+
+          # Install expect for automated passphrase entry
+          dnf install -y expect
 
           # Create expect script for automated signing
           cat > /tmp/sign-rpm.exp << 'EXPECT_EOF'
@@ -743,32 +739,25 @@ jobs:
           set timeout 30
           set rpm_file [lindex $argv 0]
           set passphrase [lindex $argv 1]
-          set key_id [lindex $argv 2]
           
-          spawn rpm --define "_gpg_name $key_id" --addsign $rpm_file
+          spawn rpm --addsign $rpm_file
           expect {
             "Enter pass phrase:" {
               send "$passphrase\r"
               exp_continue
-            }
-            "Pass phrase is good." {
-              # Success
             }
             eof
           }
           EXPECT_EOF
           chmod +x /tmp/sign-rpm.exp
 
-          # Install expect for automated passphrase entry
-          sudo apt-get install -y expect
-
-          # Sign all RPM packages with error handling
+          # Sign all RPM packages
           cd artifacts
           SIGN_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              if ! /tmp/sign-rpm.exp "$rpm" "${{ secrets.GPG_PASSPHRASE }}" "${{ secrets.GPG_KEY_ID }}" 2>&1; then
+              if ! /tmp/sign-rpm.exp "$rpm" "${{ secrets.GPG_PASSPHRASE }}" 2>&1; then
                 echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
               fi
@@ -778,7 +767,6 @@ jobs:
           if [ $SIGN_FAILED -eq 1 ]; then
             echo "::endgroup::"
             echo "::error::One or more packages failed to sign"
-            echo "::error::Check GPG configuration and passphrase"
             exit 1
           fi
 
@@ -859,12 +847,8 @@ jobs:
           set -euo pipefail
           echo "::group::Preparing merged repository"
 
-          # Install createrepo_c for metadata generation
-          if ! sudo apt-get update && sudo apt-get install -y createrepo-c; then
-            echo "::endgroup::"
-            echo "::error::Failed to install createrepo-c"
-            exit 1
-          fi
+          # Install createrepo_c for metadata generation (already installed in container)
+          # createrepo_c is already available in the Fedora container
 
           # Clone existing gh-pages branch to get current packages
           echo "Cloning existing gh-pages branch..."
