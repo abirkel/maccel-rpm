@@ -814,26 +814,25 @@ jobs:
           fi
           echo "✓ GPG signing test passed"
 
-          # Sign all RPM packages
+          # Sign all RPM packages with verbose output
           cd artifacts
           SIGN_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              if ! rpm --addsign "$rpm" 2>&1; then
+              echo "Running: rpm --addsign --define '_gpg_name ${{ secrets.GPG_KEY_ID }}' --define '__gpg /tmp/gpg-sign-wrapper.sh' $rpm"
+              if ! rpm --addsign --define "_gpg_name ${{ secrets.GPG_KEY_ID }}" --define "__gpg /tmp/gpg-sign-wrapper.sh" "$rpm" 2>&1; then
                 echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
               fi
               
               # Verify signature immediately after signing
               echo "Checking signature on $rpm..."
-              rpm --checksig "$rpm" || true
+              rpm --checksig -v "$rpm" 2>&1 || true
               
-              # Detailed signature inspection
-              echo "Detailed signature info:"
-              rpm -qip "$rpm" 2>&1 | grep -i signature || true
-              echo "Full RPM query:"
-              rpm -q --qf '%{SIGPGP:pgpsig}\n' -p "$rpm" 2>&1 || true
+              # Check if GPG signature exists
+              echo "Checking for GPG signature..."
+              rpm -qp --qf '%{SIGPGP:pgpsig}\n' "$rpm" 2>&1 || echo "No GPG signature found"
             fi
           done
 
