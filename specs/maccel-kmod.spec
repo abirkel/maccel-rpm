@@ -10,7 +10,7 @@
 
 Name:           kmod-%{kmod_name}
 Version:        %{?version}%{!?version:0.0.0}
-Release:        %{?release}%{!?release:1}%{?dist}
+Release:        %{?release}%{!?release:1}.%{kernel_version}
 Summary:        Kernel module for maccel mouse acceleration driver
 
 License:        GPL-2.0-or-later
