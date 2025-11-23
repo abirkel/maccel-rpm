@@ -791,34 +791,23 @@ jobs:
           echo "RPM macros configured:"
           cat ~/.rpmmacros
 
-          # Install expect for automated signing
-          dnf install -y expect
-
-          # Create expect script for automated signing
-          cat > /tmp/sign-rpm.exp << 'EXPECT_EOF'
-          #!/usr/bin/expect -f
-          set timeout 30
-          set rpm_file [lindex $argv 0]
-          set passphrase $env(GPG_PASSPHRASE)
+          # Start GPG agent with preset passphrase
+          eval $(gpg-agent --daemon --allow-preset-passphrase)
           
-          spawn rpm --addsign $rpm_file
-          expect {
-            "Enter pass phrase:" {
-              send "$passphrase\r"
-              exp_continue
-            }
-            eof
-          }
-          EXPECT_EOF
-          chmod +x /tmp/sign-rpm.exp
+          # Get the keygrip for preset
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys "${{ secrets.GPG_KEY_ID }}" | grep -A 1 "^sec" | tail -1 | awk '{print $3}')
+          echo "Keygrip: $KEYGRIP"
+          
+          # Preset the passphrase
+          echo "$GPG_PASSPHRASE" | /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP"
 
-          # Sign all RPM packages using expect
+          # Sign all RPM packages using rpm --addsign (should use agent now)
           cd artifacts
           SIGN_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              if ! /tmp/sign-rpm.exp "$rpm" 2>&1; then
+              if ! rpm --addsign "$rpm" 2>&1; then
                 echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
               fi
