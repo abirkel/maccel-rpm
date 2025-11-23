@@ -6,13 +6,12 @@
 
 %global debug_package %{nil}
 %global kmod_name maccel
-%global kernel_version_clean %(echo %{kernel_version} | sed 's/\\.fc/%{?dist}.fc/' | sed 's/\\.fc/.fc/')
-
-%global kernel_version_rpm %(echo %{kernel_version} | sed 's/-/_/g; s/\\./_/g')
+# Convert kernel version for RPM filename: replace - with _ and remove .x86_64 suffix
+%global kernel_version_rpm %(echo %{kernel_version} | sed 's/-/_/g' | sed 's/\\.x86_64$//')
 
 Name:           kmod-%{kmod_name}
 Version:        %{?version}%{!?version:0.0.0}
-Release:        %{?release}%{!?release:1}.%{kernel_version_rpm}%{?dist}
+Release:        %{?release}%{!?release:1}%{?dist}.%{kernel_version_rpm}
 Summary:        Kernel module for maccel mouse acceleration driver
 
 License:        GPL-2.0-or-later
