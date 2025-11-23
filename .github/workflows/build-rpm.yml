@@ -713,12 +713,26 @@ jobs:
           set -euo pipefail
           echo "::group::Signing RPM packages"
 
-          # Configure RPM signing
-          echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" > ~/.rpmmacros
-          echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
-          echo "%_gpg_sign_cmd_extra_args --batch --no-tty --yes \
-            --pinentry-mode loopback --passphrase \
-            '${{ secrets.GPG_PASSPHRASE }}'" >> ~/.rpmmacros
+          # Export and import public key into RPM database
+          gpg --export -a "${{ secrets.GPG_KEY_ID }}" > /tmp/gpg-pubkey.asc
+          sudo rpm --import /tmp/gpg-pubkey.asc
+          
+          # Verify key is in RPM database
+          echo "Keys in RPM database:"
+          rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
+
+          # Configure RPM signing with proper macros
+          cat > ~/.rpmmacros << EOF
+          %_signature gpg
+          %_gpg_path $HOME/.gnupg
+          %_gpg_name ${{ secrets.GPG_KEY_ID }}
+          %_gpgbin /usr/bin/gpg
+          %__gpg_sign_cmd %{__gpg} \
+              gpg --force-v3-sigs --batch --verbose --no-armor \
+              --passphrase-fd 3 --no-secmem-warning \
+              -u "%{_gpg_name}" -sbo %{__signature_filename} \
+              --digest-algo sha256 %{__plaintext_filename}
+          EOF
 
           # Sign all RPM packages with error handling
           cd artifacts
@@ -726,9 +740,21 @@ jobs:
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              if ! rpm --addsign "$rpm" 2>&1; then
-                echo "::error::Failed to sign package: $rpm"
+              if ! echo "${{ secrets.GPG_PASSPHRASE }}" | \
+                  gpg --batch --passphrase-fd 0 --pinentry-mode loopback \
+                  -u "${{ secrets.GPG_KEY_ID }}" --detach-sign --armor \
+                  -o "${rpm}.asc" "$rpm" 2>&1; then
+                echo "::error::Failed to create detached signature for: $rpm"
                 SIGN_FAILED=1
+              else
+                # Use rpmsign to add the signature to the RPM
+                if ! rpm --addsign --define "_gpg_name ${{ secrets.GPG_KEY_ID }}" \
+                    --define "__gpg_sign_cmd %{__gpg} gpg --batch --no-verbose --no-armor --passphrase-fd 3 --no-secmem-warning -u %{_gpg_name} -sbo %{__signature_filename} %{__plaintext_filename}" \
+                    "$rpm" 3<<< "${{ secrets.GPG_PASSPHRASE }}" 2>&1; then
+                  echo "::error::Failed to sign package: $rpm"
+                  SIGN_FAILED=1
+                fi
+                rm -f "${rpm}.asc"
               fi
             fi
           done
