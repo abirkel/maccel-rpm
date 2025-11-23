@@ -4,8 +4,8 @@
 %global debug_package %{nil}
 
 Name:           maccel
-Version:        %{version}
-Release:        %{release}%{?dist}
+Version:        %{?version}%{!?version:0.0.0}
+Release:        %{?release}%{!?release:1}%{?dist}
 Summary:        CLI tool for maccel mouse acceleration driver
 License:        GPL-2.0-or-later
 URL:            https://github.com/Gnarus-G/maccel
