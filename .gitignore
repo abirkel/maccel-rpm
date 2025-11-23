@@ -45,4 +45,4 @@ repo/
 # GitHub Actions artifacts
 artifacts/
 akmods/
-bazzite/
+bazzite/.kiro/specs/*/tasks.md
