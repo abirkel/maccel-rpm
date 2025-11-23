@@ -111,18 +111,25 @@ if [[ -z "$ASSET_NAMES" ]]; then
 fi
 
 # Look for kmod packages matching our version and kernel version
-# Package naming pattern: kmod-maccel-VERSION-RELEASE.KERNEL_VERSION.rpm
-# Example: kmod-maccel-0.5.6-1.6.17.8-300.fc43.x86_64.rpm
+# Package naming pattern: kmod-maccel-VERSION-RELEASE.fc43.KERNEL_VERSION_RPM.x86_64.rpm
+# Example: kmod-maccel-0.5.6-1.fc43.6.17.8_300.fc43.x86_64.rpm
+# Note: kernel version has dashes replaced with underscores in RPM filename
 
 echo "Searching for existing packages..." >&2
 
 # Escape dots in version strings for regex
 MACCEL_VERSION_ESCAPED="${MACCEL_VERSION//./\\.}"
-KERNEL_VERSION_ESCAPED="${KERNEL_VERSION//./\\.}"
+
+# Convert kernel version to RPM format (replace - with _)
+KERNEL_VERSION_RPM="${KERNEL_VERSION//-/_}"
+# Remove .x86_64 suffix for matching
+KERNEL_VERSION_RPM="${KERNEL_VERSION_RPM%.x86_64}"
+# Escape dots for regex
+KERNEL_VERSION_RPM_ESCAPED="${KERNEL_VERSION_RPM//./\\.}"
 
 # Find matching packages and extract release numbers
-# Pattern: kmod-maccel-VERSION-RELEASE.KERNEL_VERSION.rpm
-MATCHING_PACKAGES=$(echo "$ASSET_NAMES" | grep -E "^kmod-maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.${KERNEL_VERSION_ESCAPED}\.rpm$" || true)
+# Pattern: kmod-maccel-VERSION-RELEASE.fc43.KERNEL_VERSION_RPM.x86_64.rpm
+MATCHING_PACKAGES=$(echo "$ASSET_NAMES" | grep -E "^kmod-maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.fc[0-9]+\.${KERNEL_VERSION_RPM_ESCAPED}\.x86_64\.rpm$" || true)
 
 if [[ -z "$MATCHING_PACKAGES" ]]; then
   echo "No matching packages found for version $MACCEL_VERSION and kernel $KERNEL_VERSION" >&2
@@ -137,9 +144,9 @@ while IFS= read -r pkg; do
 done <<< "$MATCHING_PACKAGES"
 
 # Extract release numbers from matching packages
-# Pattern: kmod-maccel-VERSION-RELEASE.KERNEL_VERSION.rpm
-# We need to extract RELEASE (the number between VERSION- and .KERNEL_VERSION)
-RELEASE_NUMBERS=$(echo "$MATCHING_PACKAGES" | sed -E "s/^kmod-maccel-${MACCEL_VERSION_ESCAPED}-([0-9]+)\.${KERNEL_VERSION_ESCAPED}\.rpm$/\1/")
+# Pattern: kmod-maccel-VERSION-RELEASE.fc43.KERNEL_VERSION_RPM.x86_64.rpm
+# We need to extract RELEASE (the number between VERSION- and .fc43)
+RELEASE_NUMBERS=$(echo "$MATCHING_PACKAGES" | sed -E "s/^kmod-maccel-${MACCEL_VERSION_ESCAPED}-([0-9]+)\.fc[0-9]+\.${KERNEL_VERSION_RPM_ESCAPED}\.x86_64\.rpm$/\1/")
 
 # Find the highest release number
 MAX_RELEASE=0
