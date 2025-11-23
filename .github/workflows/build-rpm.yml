@@ -456,6 +456,40 @@ jobs:
           echo "✓ Determined release number: $RELEASE_NUMBER"
           echo "::endgroup::"
 
+      - name: Determine CLI release number
+        id: cli-release
+        if: inputs.build_cli == true && matrix.build_cli == 'true'
+        run: |
+          set -euo pipefail
+          MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
+
+          echo "::group::Determining CLI release number"
+
+          # Make script executable
+          chmod +x scripts/determine-cli-release-number.sh
+
+          # Determine CLI release number with error handling
+          if ! CLI_RELEASE_NUMBER=$(./scripts/determine-cli-release-number.sh \
+            --maccel-version "$MACCEL_VERSION" \
+            --repo "${{ github.repository }}"); then
+            echo "::endgroup::"
+            echo "::error::Failed to determine CLI release number"
+            echo "::error::Maccel version: $MACCEL_VERSION"
+            exit 1
+          fi
+
+          # Validate release number is a positive integer
+          if ! [[ "$CLI_RELEASE_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::endgroup::"
+            echo "::error::Invalid CLI release number: $CLI_RELEASE_NUMBER"
+            echo "::error::Expected a positive integer"
+            exit 1
+          fi
+
+          echo "cli_release_number=$CLI_RELEASE_NUMBER" >> $GITHUB_OUTPUT
+          echo "✓ Determined CLI release number: $CLI_RELEASE_NUMBER"
+          echo "::endgroup::"
+
       - name: Download maccel source
         run: |
           KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
@@ -528,19 +562,19 @@ jobs:
           cd ~/rpmbuild/SPECS
 
           MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
-          RELEASE_NUMBER="${{ steps.release.outputs.release_number }}"
+          CLI_RELEASE_NUMBER="${{ steps.cli-release.outputs.cli_release_number }}"
 
           # Strip 'v' prefix from version if present
           VERSION="${MACCEL_VERSION#v}"
 
           echo "::group::Building maccel CLI"
           echo "  Maccel version: $VERSION"
-          echo "  Release number: $RELEASE_NUMBER"
+          echo "  CLI release number: $CLI_RELEASE_NUMBER"
 
           # Build with log capture
           BUILD_LOG="/tmp/cli-build.log"
           if ! rpmbuild --define "version ${VERSION}" \
-                   --define "release ${RELEASE_NUMBER}" \
+                   --define "release ${CLI_RELEASE_NUMBER}" \
                    -ba maccel.spec 2>&1 | tee "$BUILD_LOG"; then
             echo "::endgroup::"
             echo "::error::maccel CLI build failed"
