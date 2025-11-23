@@ -382,15 +382,29 @@ jobs:
           set -euo pipefail
           echo "::group::Installing kernel-devel packages"
 
-          if ! dnf install -y ~/kernel-packages/kernel-devel*.rpm; then
-            echo "::endgroup::"
-            echo "::error::Failed to install kernel-devel packages"
-            echo "::error::Package corruption or dependency issues"
-            exit 1
+          KERNEL_TYPE="${{ matrix.kernel_type }}"
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+
+          # For Bazzite kernels, only install kernel-devel (not kernel-devel-matched)
+          # kernel-devel-matched requires kernel-core which isn't available for Bazzite
+          if [[ "$KERNEL_TYPE" == "bazzite" ]]; then
+            echo "Installing kernel-devel only (Bazzite kernel)..."
+            if ! dnf install -y ~/kernel-packages/kernel-devel-${KERNEL_VERSION}.rpm; then
+              echo "::endgroup::"
+              echo "::error::Failed to install kernel-devel package"
+              exit 1
+            fi
+          else
+            echo "Installing all kernel-devel packages (main kernel)..."
+            if ! dnf install -y ~/kernel-packages/kernel-devel*.rpm; then
+              echo "::endgroup::"
+              echo "::error::Failed to install kernel-devel packages"
+              echo "::error::Package corruption or dependency issues"
+              exit 1
+            fi
           fi
 
           # Verify installation
-          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
           if ! rpm -q "kernel-devel-${KERNEL_VERSION}"; then
             echo "::endgroup::"
             echo "::error::kernel-devel package not found after installation"
