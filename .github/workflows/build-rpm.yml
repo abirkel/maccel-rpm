@@ -451,8 +451,17 @@ jobs:
 
       - name: Download maccel source
         run: |
+          KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
+          MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
+          
           for spec in specs/*.spec; do
-            spectool -g -R "$spec"
+            if [[ "$spec" == *"kmod"* ]]; then
+              # Provide kernel_version for kmod spec parsing
+              spectool -g -R --define "kernel_version ${KERNEL_VERSION}" \
+                --define "version ${MACCEL_VERSION#v}" "$spec"
+            else
+              spectool -g -R "$spec"
+            fi
           done
 
       - name: Copy spec files
