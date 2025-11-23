@@ -913,58 +913,74 @@ jobs:
           # Install git for gh-pages action
           dnf install -y git
 
-          # Install createrepo_c for metadata generation (already installed in container)
-          # createrepo_c is already available in the Fedora container
-
           # Clone existing gh-pages branch to get current packages
           echo "Cloning existing gh-pages branch..."
           git clone --depth=1 --branch=gh-pages \
             https://github.com/${{ github.repository }}.git gh-pages-repo \
             || mkdir -p gh-pages-repo
 
-          # Prepare repo directory with existing + new packages
-          mkdir -p repo
+          # Determine Fedora version and architecture
+          FEDORA_VERSION="${{ needs.load-config.outputs.container_version }}"
+          ARCH="x86_64"
 
-          # Copy existing RPM files from gh-pages (if any)
-          if [ -d "gh-pages-repo" ]; then
+          # Create Fedora-standard repository structure
+          # repo/fedora/VERSION/ARCH/ for binary RPMs
+          # repo/fedora/VERSION/source/ for source RPMs
+          REPO_BASE="repo/fedora/${FEDORA_VERSION}"
+          mkdir -p "${REPO_BASE}/${ARCH}"
+          mkdir -p "${REPO_BASE}/source"
+
+          # Copy existing packages from gh-pages (preserving structure)
+          if [ -d "gh-pages-repo/fedora" ]; then
             echo "Copying existing packages from gh-pages..."
-            find gh-pages-repo -maxdepth 1 -name "*.rpm" \
-              -exec cp {} repo/ \; 2>/dev/null || true
+            cp -r gh-pages-repo/fedora/* repo/fedora/ 2>/dev/null || true
           fi
 
-          # Copy new signed packages
-          echo "Copying new signed packages..."
-          if ! cp artifacts/*.rpm repo/ 2>/dev/null; then
+          # Sort new packages into proper directories
+          echo "Organizing new packages..."
+          for rpm in artifacts/*.rpm; do
+            if [ -f "$rpm" ]; then
+              if [[ "$rpm" == *.src.rpm ]]; then
+                # Source RPMs go to source/
+                cp "$rpm" "${REPO_BASE}/source/"
+                echo "  → $(basename "$rpm") → source/"
+              else
+                # Binary RPMs go to arch directory
+                cp "$rpm" "${REPO_BASE}/${ARCH}/"
+                echo "  → $(basename "$rpm") → ${ARCH}/"
+              fi
+            fi
+          done
+
+          # Verify we have packages
+          if ! ls "${REPO_BASE}/${ARCH}"/*.rpm 1>/dev/null 2>&1 && \
+             ! ls "${REPO_BASE}/source"/*.rpm 1>/dev/null 2>&1; then
             echo "::endgroup::"
-            echo "::error::Failed to copy signed packages to repository"
+            echo "::error::No packages found after organization"
             exit 1
           fi
 
-          # Verify we have packages in repo
-          if ! ls repo/*.rpm 1>/dev/null 2>&1; then
-            echo "::endgroup::"
-            echo "::error::No packages found in repository after merge"
-            exit 1
-          fi
+          # List organized packages
+          echo ""
+          echo "Repository structure:"
+          echo "Binary packages (${ARCH}):"
+          ls -lh "${REPO_BASE}/${ARCH}"/*.rpm 2>/dev/null || echo "  (none)"
+          echo ""
+          echo "Source packages:"
+          ls -lh "${REPO_BASE}/source"/*.rpm 2>/dev/null || echo "  (none)"
 
-          # List all packages in repo
-          echo "Packages in repository:"
-          ls -lh repo/*.rpm
+          # Generate repository metadata for binary packages
+          echo ""
+          echo "Generating repository metadata for ${ARCH}..."
+          createrepo_c "${REPO_BASE}/${ARCH}/"
 
-          # Regenerate metadata for ALL packages
-          echo "Regenerating repository metadata..."
-          if ! createrepo_c repo/; then
-            echo "::endgroup::"
-            echo "::error::Failed to generate repository metadata"
-            exit 1
-          fi
+          # Generate repository metadata for source packages
+          echo "Generating repository metadata for source..."
+          createrepo_c "${REPO_BASE}/source/"
 
-          # Verify metadata was created
-          if [ ! -d "repo/repodata" ]; then
-            echo "::endgroup::"
-            echo "::error::Repository metadata directory not created"
-            exit 1
-          fi
+          # Generate top-level metadata
+          echo "Generating top-level repository metadata..."
+          createrepo_c repo/
 
           echo "✓ Repository preparation complete"
           echo "::endgroup::"
