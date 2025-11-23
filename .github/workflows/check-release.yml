@@ -3,7 +3,7 @@ name: Check Upstream Versions
 
 'on':
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 6 * * *'  # Build at 06:00 UTC every day (20 minutes after ublue images start building)
   workflow_dispatch:
 
 jobs:
