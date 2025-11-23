@@ -416,13 +416,12 @@ jobs:
             --maccel-version "$MACCEL_VERSION" \
             --kernel-version "$KERNEL_VERSION" \
             --kernel-type "$KERNEL_TYPE" \
-            --repo "${{ github.repository }}" 2>&1); then
+            --repo "${{ github.repository }}"); then
             echo "::endgroup::"
             echo "::error::Failed to determine release number"
             echo "::error::Maccel version: $MACCEL_VERSION"
             echo "::error::Kernel version: $KERNEL_VERSION"
             echo "::error::Kernel type: $KERNEL_TYPE"
-            echo "$RELEASE_NUMBER"
             exit 1
           fi
 
