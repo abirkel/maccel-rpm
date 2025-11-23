@@ -1,7 +1,9 @@
 # Build kmod package for a specific kernel version
 # Usage: rpmbuild --define 'kernel_version 6.11.8-300.fc41.x86_64' -ba maccel-kmod.spec
 
-%{!?kernel_version: %{error: kernel_version must be defined. Use: rpmbuild --define 'kernel_version X.X.X-XXX.fcXX.x86_64'}}
+# Set default kernel_version for dnf builddep parsing
+# This will be overridden at build time with the actual kernel version
+%{!?kernel_version: %global kernel_version 0.0.0-0.fc43.x86_64}
 
 %global debug_package %{nil}
 %global kmod_name maccel
