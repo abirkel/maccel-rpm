@@ -292,19 +292,10 @@ jobs:
       - name: Load maccel version
         id: load_maccel
         run: |
-          # Use workflow input if provided, otherwise read from file
-          INPUT_VERSION="${{ inputs.maccel_version }}"
-          if [ -n "$INPUT_VERSION" ]; then
-            echo "maccel_version=$INPUT_VERSION" >> $GITHUB_OUTPUT
-            echo "Using maccel version from workflow input: $INPUT_VERSION"
-          elif [ -f .external_versions ]; then
-            source .external_versions
-            echo "maccel_version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
-            echo "Using maccel version from .external_versions: $MACCEL_VERSION"
-          else
-            echo "ERROR: No maccel version specified"
-            exit 1
-          fi
+          # Use maccel version from resolve-versions job output
+          MACCEL_VERSION="${{ needs.resolve-versions.outputs.maccel_version }}"
+          echo "maccel_version=$MACCEL_VERSION" >> $GITHUB_OUTPUT
+          echo "Using maccel version from resolve-versions: $MACCEL_VERSION"
 
       - name: Install build dependencies
         run: |
