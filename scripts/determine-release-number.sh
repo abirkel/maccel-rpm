@@ -120,9 +120,8 @@ echo "Searching for existing packages..." >&2
 # Escape dots in version strings for regex
 MACCEL_VERSION_ESCAPED="${MACCEL_VERSION//./\\.}"
 
-# Convert kernel version to RPM format (replace - with _)
+# Convert kernel version to RPM format (replace - with _, remove .x86_64)
 KERNEL_VERSION_RPM="${KERNEL_VERSION//-/_}"
-# Remove .x86_64 suffix for matching
 KERNEL_VERSION_RPM="${KERNEL_VERSION_RPM%.x86_64}"
 # Escape dots for regex
 KERNEL_VERSION_RPM_ESCAPED="${KERNEL_VERSION_RPM//./\\.}"

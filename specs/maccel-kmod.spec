@@ -6,7 +6,8 @@
 
 %global debug_package %{nil}
 %global kmod_name maccel
-# Convert kernel version for RPM filename: replace only - with _ and remove .x86_64 suffix
+# Convert kernel version for RPM filename: replace - with _ and remove arch suffix
+# Note: RPM will add .x86_64 automatically to binary packages
 %global kernel_version_rpm %(echo %{kernel_version} | sed 's/-/_/g' | sed 's/\\.x86_64$//')
 
 Name:           kmod-%{kmod_name}
