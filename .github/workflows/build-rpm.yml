@@ -773,11 +773,19 @@ jobs:
             echo "::error::Failed to create detached signature"
           fi
 
-          # Configure RPM to use wrapper script
+          # Configure GPG to use SHA256 for digests
+          cat > ~/.gnupg/gpg.conf << 'GPG_CONF'
+          personal-digest-preferences SHA256
+          cert-digest-algo SHA256
+          default-preference-list SHA512 SHA384 SHA256 SHA224 AES256 AES192 AES CAST5 ZLIB BZIP2 ZIP Uncompressed
+          GPG_CONF
+
+          # Configure RPM to use wrapper script with SHA256
           cat > ~/.rpmmacros << 'EOF'
           %_signature gpg
           %_gpg_name ${{ secrets.GPG_KEY_ID }}
           %__gpg /tmp/gpg-sign-wrapper.sh
+          %_gpg_digest_algo sha256
           EOF
 
           echo "RPM macros configured:"
@@ -818,6 +826,12 @@ jobs:
               # Verify signature immediately after signing
               echo "Checking signature on $rpm..."
               rpm --checksig "$rpm" || true
+              
+              # Detailed signature inspection
+              echo "Detailed signature info:"
+              rpm -qip "$rpm" 2>&1 | grep -i signature || true
+              echo "Full RPM query:"
+              rpm -q --qf '%{SIGPGP:pgpsig}\n' -p "$rpm" 2>&1 || true
             fi
           done
 
