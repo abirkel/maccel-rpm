@@ -222,21 +222,19 @@ jobs:
           if [ -n "$EXPLICIT_VERSION" ]; then
             if ! KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
               --kernel-type "$KERNEL_TYPE" \
-              --version "$EXPLICIT_VERSION" 2>&1); then
+              --version "$EXPLICIT_VERSION"); then
               echo "::endgroup::"
               echo "::error::Failed to resolve kernel version"
               echo "::error::Kernel type: $KERNEL_TYPE"
               echo "::error::Explicit version: $EXPLICIT_VERSION"
-              echo "$KERNEL_VERSION"
               exit 1
             fi
           else
             if ! KERNEL_VERSION=$(./scripts/resolve-kernel-version.sh \
-              --kernel-type "$KERNEL_TYPE" 2>&1); then
+              --kernel-type "$KERNEL_TYPE"); then
               echo "::endgroup::"
               echo "::error::Failed to resolve kernel version"
               echo "::error::Kernel type: $KERNEL_TYPE"
-              echo "$KERNEL_VERSION"
               exit 1
             fi
           fi
