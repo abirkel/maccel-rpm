@@ -759,17 +759,34 @@ jobs:
           echo "RPM macros configured:"
           cat ~/.rpmmacros
 
-          # Sign all RPM packages using rpmsign directly
+          # Install expect for automated signing
+          dnf install -y expect
+
+          # Create expect script for automated signing
+          cat > /tmp/sign-rpm.exp << 'EXPECT_EOF'
+          #!/usr/bin/expect -f
+          set timeout 30
+          set rpm_file [lindex $argv 0]
+          set passphrase $env(GPG_PASSPHRASE)
+          
+          spawn rpm --addsign $rpm_file
+          expect {
+            "Enter pass phrase:" {
+              send "$passphrase\r"
+              exp_continue
+            }
+            eof
+          }
+          EXPECT_EOF
+          chmod +x /tmp/sign-rpm.exp
+
+          # Sign all RPM packages using expect
           cd artifacts
           SIGN_FAILED=0
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              # Use rpmsign with explicit key and passphrase
-              if ! echo "$GPG_PASSPHRASE" | rpmsign --addsign \
-                --key-id="${{ secrets.GPG_KEY_ID }}" \
-                --digest-algo=sha256 \
-                "$rpm" 2>&1; then
+              if ! /tmp/sign-rpm.exp "$rpm" 2>&1; then
                 echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
               fi
