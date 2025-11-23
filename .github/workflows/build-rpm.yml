@@ -745,9 +745,33 @@ jobs:
           fi
           echo "✓ GPG wrapper test passed"
 
-          # List available secret keys
+          # List available secret keys with full details
           echo "Available GPG secret keys:"
-          gpg --list-secret-keys --keyid-format LONG
+          gpg --list-secret-keys --keyid-format LONG --with-subkey-fingerprints
+          
+          # Check key capabilities
+          echo ""
+          echo "Key capabilities check:"
+          gpg --list-keys --with-colons "${{ secrets.GPG_KEY_ID }}" | grep -E "^(pub|sub):" | while IFS=: read -r type trust keylen algo keyid date expires dummy uid_hash dummy2 caps rest; do
+            echo "  Type: $type, KeyID: $keyid, Capabilities: $caps"
+          done
+          
+          # Test actual detached signature creation (what RPM uses)
+          echo ""
+          echo "Testing detached signature creation (RPM-style)..."
+          echo "test data" > /tmp/test.txt
+          if /tmp/gpg-sign-wrapper.sh --detach-sign -u "${{ secrets.GPG_KEY_ID }}" --armor /tmp/test.txt 2>&1; then
+            echo "✓ Detached signature created successfully"
+            ls -la /tmp/test.txt.asc
+            # Verify the signature
+            if gpg --verify /tmp/test.txt.asc /tmp/test.txt 2>&1; then
+              echo "✓ Signature verification successful"
+            else
+              echo "::error::Signature verification FAILED"
+            fi
+          else
+            echo "::error::Failed to create detached signature"
+          fi
 
           # Configure RPM to use wrapper script
           cat > ~/.rpmmacros << 'EOF'
