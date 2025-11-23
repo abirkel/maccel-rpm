@@ -724,18 +724,27 @@ jobs:
           echo "Keys in RPM database:"
           rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
 
-          # Configure RPM signing with custom GPG command for batch mode
+          # Create GPG wrapper script that handles passphrase
+          cat > /tmp/gpg-sign-wrapper.sh << 'WRAPPER_EOF'
+          #!/bin/bash
+          # GPG wrapper for RPM signing - reads passphrase from environment
+          echo "$GPG_PASSPHRASE" | /usr/bin/gpg \
+            --batch \
+            --pinentry-mode loopback \
+            --passphrase-fd 0 \
+            "$@"
+          WRAPPER_EOF
+          chmod +x /tmp/gpg-sign-wrapper.sh
+
+          # Configure RPM to use wrapper script
           cat > ~/.rpmmacros << 'EOF'
           %_signature gpg
           %_gpg_name ${{ secrets.GPG_KEY_ID }}
-          %__gpg /usr/bin/gpg
-          %__gpg_sign_cmd %{__gpg} \
-              --batch --no-verbose --no-armor \
-              --passphrase-fd 3 --pinentry-mode loopback \
-              --no-secmem-warning \
-              -u "%{_gpg_name}" -sbo %{__signature_filename} \
-              --digest-algo sha256 %{__plaintext_filename}
+          %__gpg /tmp/gpg-sign-wrapper.sh
           EOF
+
+          # Export passphrase for wrapper script
+          export GPG_PASSPHRASE="${{ secrets.GPG_PASSPHRASE }}"
 
           # Sign all RPM packages
           cd artifacts
@@ -743,8 +752,7 @@ jobs:
           for rpm in *.rpm; do
             if [ -f "$rpm" ]; then
               echo "Signing $rpm"
-              # Pass passphrase via file descriptor 3
-              if ! rpm --addsign "$rpm" 3<<< "${{ secrets.GPG_PASSPHRASE }}" 2>&1; then
+              if ! rpm --addsign "$rpm" 2>&1; then
                 echo "::error::Failed to sign package: $rpm"
                 SIGN_FAILED=1
               fi
