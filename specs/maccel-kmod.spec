@@ -24,7 +24,6 @@ Source0:        %{url}/archive/v%{version}/maccel-%{version}.tar.gz
 BuildRequires:  gcc
 BuildRequires:  make
 
-Requires:       kernel = %{kernel_version}
 Provides:       kmod-maccel = %{version}-%{release}
 Provides:       %{kmod_name}-kmod = %{version}-%{release}
 
