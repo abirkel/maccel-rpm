@@ -9,6 +9,7 @@ set -euo pipefail
 MACCEL_VERSION=""
 KERNEL_VERSION=""
 KERNEL_TYPE=""
+RELEASE_TYPE="stable"
 GITHUB_REPO="abirkel/maccel-rpm"
 
 # Parse CLI options
@@ -26,13 +27,17 @@ while [[ $# -gt 0 ]]; do
       KERNEL_TYPE="$2"
       shift 2
       ;;
+    --release-type)
+      RELEASE_TYPE="$2"
+      shift 2
+      ;;
     --repo)
       GITHUB_REPO="$2"
       shift 2
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 --maccel-version <version> --kernel-version <version> --kernel-type <main|bazzite> [--repo <owner/repo>]"
+      echo "Usage: $0 --maccel-version <version> --kernel-version <version> --kernel-type <main|bazzite> [--release-type <stable|testing>] [--repo <owner/repo>]"
       exit 1
       ;;
   esac
@@ -59,6 +64,11 @@ if [[ "$KERNEL_TYPE" != "main" && "$KERNEL_TYPE" != "bazzite" ]]; then
   exit 1
 fi
 
+if [[ "$RELEASE_TYPE" != "stable" && "$RELEASE_TYPE" != "testing" ]]; then
+  echo "Error: release-type must be 'stable' or 'testing', got '$RELEASE_TYPE'"
+  exit 1
+fi
+
 # Strip 'v' prefix from maccel version if present
 MACCEL_VERSION="${MACCEL_VERSION#v}"
 
@@ -66,6 +76,7 @@ echo "Determining release number for:" >&2
 echo "  Maccel version: $MACCEL_VERSION" >&2
 echo "  Kernel version: $KERNEL_VERSION" >&2
 echo "  Kernel type: $KERNEL_TYPE" >&2
+echo "  Release type: $RELEASE_TYPE" >&2
 echo "  Repository: $GITHUB_REPO" >&2
 
 # Query GitHub releases API
@@ -128,7 +139,24 @@ KERNEL_VERSION_RPM_ESCAPED="${KERNEL_VERSION_RPM//./\\.}"
 
 # Find matching packages and extract release numbers
 # Pattern: kmod-maccel-VERSION-RELEASE.fc43.KERNEL_VERSION_RPM.x86_64.rpm
+# Filter by release type from release names (v0.5.6-stable or v0.5.6-testing)
 MATCHING_PACKAGES=$(echo "$ASSET_NAMES" | grep -E "^kmod-maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.fc[0-9]+\.${KERNEL_VERSION_RPM_ESCAPED}\.x86_64\.rpm$" || true)
+
+# Further filter by release type by checking release names
+if [[ -n "$MATCHING_PACKAGES" ]]; then
+  # Get release names from the API response
+  RELEASE_NAMES=$(echo "$RELEASES_JSON" | jq -r '.[].name' 2>&1)
+  
+  # Filter releases by type (e.g., v0.5.6-stable or v0.5.6-testing)
+  FILTERED_RELEASES=$(echo "$RELEASE_NAMES" | grep -E "\-${RELEASE_TYPE}$" || true)
+  
+  if [[ -n "$FILTERED_RELEASES" ]]; then
+    # Extract asset names from filtered releases only
+    MATCHING_PACKAGES=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.name | test(\"-${RELEASE_TYPE}$\")) | .assets[].name" | grep -E "^kmod-maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.fc[0-9]+\.${KERNEL_VERSION_RPM_ESCAPED}\.x86_64\.rpm$" || true)
+  else
+    MATCHING_PACKAGES=""
+  fi
+fi
 
 if [[ -z "$MATCHING_PACKAGES" ]]; then
   echo "No matching packages found for version $MACCEL_VERSION and kernel $KERNEL_VERSION" >&2

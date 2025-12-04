@@ -7,6 +7,7 @@ set -euo pipefail
 
 # Default values
 MACCEL_VERSION=""
+RELEASE_TYPE="stable"
 GITHUB_REPO="abirkel/maccel-rpm"
 
 # Parse CLI options
@@ -16,13 +17,17 @@ while [[ $# -gt 0 ]]; do
       MACCEL_VERSION="$2"
       shift 2
       ;;
+    --release-type)
+      RELEASE_TYPE="$2"
+      shift 2
+      ;;
     --repo)
       GITHUB_REPO="$2"
       shift 2
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 --maccel-version <version> [--repo <owner/repo>]"
+      echo "Usage: $0 --maccel-version <version> [--release-type <stable|testing>] [--repo <owner/repo>]"
       exit 1
       ;;
   esac
@@ -34,11 +39,17 @@ if [[ -z "$MACCEL_VERSION" ]]; then
   exit 1
 fi
 
+if [[ "$RELEASE_TYPE" != "stable" && "$RELEASE_TYPE" != "testing" ]]; then
+  echo "Error: release-type must be 'stable' or 'testing', got '$RELEASE_TYPE'"
+  exit 1
+fi
+
 # Strip 'v' prefix from maccel version if present
 MACCEL_VERSION="${MACCEL_VERSION#v}"
 
 echo "Determining CLI release number for:" >&2
 echo "  Maccel version: $MACCEL_VERSION" >&2
+echo "  Release type: $RELEASE_TYPE" >&2
 echo "  Repository: $GITHUB_REPO" >&2
 
 # Query GitHub releases API
@@ -95,6 +106,22 @@ MACCEL_VERSION_ESCAPED="${MACCEL_VERSION//./\\.}"
 # Find matching packages and extract release numbers
 # Pattern: maccel-VERSION-RELEASE.fc43.x86_64.rpm (not kmod-maccel)
 MATCHING_PACKAGES=$(echo "$ASSET_NAMES" | grep -E "^maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.fc[0-9]+\.x86_64\.rpm$" || true)
+
+# Further filter by release type by checking release names
+if [[ -n "$MATCHING_PACKAGES" ]]; then
+  # Get release names from the API response
+  RELEASE_NAMES=$(echo "$RELEASES_JSON" | jq -r '.[].name' 2>&1)
+  
+  # Filter releases by type (e.g., v0.5.6-stable or v0.5.6-testing)
+  FILTERED_RELEASES=$(echo "$RELEASE_NAMES" | grep -E "\-${RELEASE_TYPE}$" || true)
+  
+  if [[ -n "$FILTERED_RELEASES" ]]; then
+    # Extract asset names from filtered releases only
+    MATCHING_PACKAGES=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.name | test(\"-${RELEASE_TYPE}$\")) | .assets[].name" | grep -E "^maccel-${MACCEL_VERSION_ESCAPED}-[0-9]+\.fc[0-9]+\.x86_64\.rpm$" || true)
+  else
+    MATCHING_PACKAGES=""
+  fi
+fi
 
 if [[ -z "$MATCHING_PACKAGES" ]]; then
   echo "No matching CLI packages found for version $MACCEL_VERSION" >&2

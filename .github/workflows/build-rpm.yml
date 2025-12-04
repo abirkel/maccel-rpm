@@ -44,6 +44,14 @@ name: Build and Publish RPM Packages
         required: false
         type: string
         default: ''
+      release_type:
+        description: 'Release type (stable or testing)'
+        required: false
+        type: choice
+        options:
+          - stable
+          - testing
+        default: 'stable'
   workflow_call:
     inputs:
       kernel_types:
@@ -86,10 +94,16 @@ name: Build and Publish RPM Packages
         required: false
         type: string
         default: ''
+      release_type:
+        description: 'Release type (stable or testing)'
+        required: false
+        type: string
+        default: 'stable'
 
 permissions:
   contents: write
   packages: write
+  actions: read
 
 jobs:
   load-config:
@@ -424,6 +438,7 @@ jobs:
           MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
           KERNEL_VERSION="${{ steps.load_version.outputs.kernel_version }}"
           KERNEL_TYPE="${{ matrix.kernel_type }}"
+          RELEASE_TYPE="${{ inputs.release_type }}"
 
           echo "::group::Determining release number"
 
@@ -435,6 +450,7 @@ jobs:
             --maccel-version "$MACCEL_VERSION" \
             --kernel-version "$KERNEL_VERSION" \
             --kernel-type "$KERNEL_TYPE" \
+            --release-type "$RELEASE_TYPE" \
             --repo "${{ github.repository }}"); then
             echo "::endgroup::"
             echo "::error::Failed to determine release number"
@@ -462,6 +478,7 @@ jobs:
         run: |
           set -euo pipefail
           MACCEL_VERSION="${{ steps.load_maccel.outputs.maccel_version }}"
+          RELEASE_TYPE="${{ inputs.release_type }}"
 
           echo "::group::Determining CLI release number"
 
@@ -471,6 +488,7 @@ jobs:
           # Determine CLI release number with error handling
           if ! CLI_RELEASE_NUMBER=$(./scripts/determine-cli-release-number.sh \
             --maccel-version "$MACCEL_VERSION" \
+            --release-type "$RELEASE_TYPE" \
             --repo "${{ github.repository }}"); then
             echo "::endgroup::"
             echo "::error::Failed to determine CLI release number"
@@ -663,13 +681,9 @@ jobs:
           name: rpm-packages-${{ matrix.kernel_type }}
           path: release-packages/
 
-  publish:
-    needs: [build-rpm, resolve-versions, load-config]
+  publish-release:
+    needs: [build-rpm, resolve-versions]
     runs-on: ubuntu-latest
-    container:
-      image: >-
-        ${{ needs.load-config.outputs.container_image }}:${{
-        needs.load-config.outputs.container_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -686,7 +700,6 @@ jobs:
           set -euo pipefail
           echo "::group::Verifying downloaded packages"
 
-          # Check that artifacts directory exists and has packages
           if [ ! -d "artifacts" ]; then
             echo "::error::Artifacts directory not found"
             exit 1
@@ -694,14 +707,12 @@ jobs:
 
           if ! ls artifacts/*.rpm 1>/dev/null 2>&1; then
             echo "::error::No RPM packages found in artifacts"
-            echo "::error::Build jobs may have failed to produce packages"
             exit 1
           fi
 
           echo "Downloaded packages:"
           ls -lh artifacts/
 
-          # Verify each package is not empty
           for pkg in artifacts/*.rpm; do
             if [ ! -s "$pkg" ]; then
               echo "::error::Package file is empty: $pkg"
@@ -710,115 +721,7 @@ jobs:
           done
 
           echo "✓ All packages verified"
-          echo "::endgroup::"
-
-      - name: Install RPM signing tools
-        run: |
-          dnf install -y rpm-sign gnupg2 createrepo_c rpmsign
-
-      - name: Setup GPG for signing
-        run: |
-          set -euo pipefail
-          echo "::group::Setting up GPG for signing"
-
-          # Decode and import private key
-          if ! echo "${{ secrets.GPG_PRIVATE_KEY }}" | \
-              base64 -d > private.key; then
-            echo "::endgroup::"
-            echo "::error::Failed to decode GPG_PRIVATE_KEY"
-            echo "::error::Ensure the secret is properly base64 encoded"
-            exit 1
-          fi
-
-          if ! gpg --batch --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
-            --import private.key 2>&1; then
-            rm -f private.key
-            echo "::endgroup::"
-            echo "::error::Failed to import GPG private key"
-            echo "::error::Check that GPG_PASSPHRASE is correct"
-            exit 1
-          fi
-
-          # Set trust level
-          if ! echo -e "5\ny\n" | gpg --batch --command-fd 0 \
-            --edit-key "${{ secrets.GPG_KEY_ID }}" trust 2>&1; then
-            rm -f private.key
-            echo "::endgroup::"
-            echo "::error::Failed to set trust level for GPG key"
-            exit 1
-          fi
-
-          rm -f private.key
-          echo "✓ GPG configured successfully"
-          echo "::endgroup::"
-
-      - name: Sign all RPM packages
-        run: |
-          set -euo pipefail
-          echo "::group::Signing RPM packages"
-
-          # Import public key into RPM database
-          gpg --export -a "${{ secrets.GPG_KEY_ID }}" > /tmp/gpg-pubkey.asc
-          rpm --import /tmp/gpg-pubkey.asc
-          
-          # Verify key is in RPM database
-          echo "Keys in RPM database:"
-          rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
-
-          # Create GPG wrapper script that handles passphrase
-          cat > /tmp/gpg-sign-wrapper.sh << 'WRAPPER_EOF'
-          #!/bin/bash
-          # GPG wrapper for RPM signing - reads passphrase from environment
-          echo "$GPG_PASSPHRASE" | /usr/bin/gpg \
-            --batch \
-            --pinentry-mode loopback \
-            --passphrase-fd 0 \
-            "$@"
-          WRAPPER_EOF
-          chmod +x /tmp/gpg-sign-wrapper.sh
-
-          # Test the wrapper script works
-          echo "Testing GPG wrapper..."
-          export GPG_PASSPHRASE="${{ secrets.GPG_PASSPHRASE }}"
-          if ! echo "test" | /tmp/gpg-sign-wrapper.sh --clearsign -u "${{ secrets.GPG_KEY_ID }}" > /dev/null 2>&1; then
-            echo "::error::GPG wrapper test failed - passphrase or key issue"
-            exit 1
-          fi
-          echo "✓ GPG wrapper test passed"
-
-          # List available secret keys with full details
-          echo "Available GPG secret keys:"
-          gpg --list-secret-keys --keyid-format LONG --with-subkey-fingerprints
-          
-          # Check key capabilities
-          echo ""
-          echo "Key capabilities check:"
-          gpg --list-keys --with-colons "${{ secrets.GPG_KEY_ID }}" | grep -E "^(pub|sub):" | while IFS=: read -r type trust keylen algo keyid date expires dummy uid_hash dummy2 caps rest; do
-            echo "  Type: $type, KeyID: $keyid, Capabilities: $caps"
-          done
-          
-          # Test actual detached signature creation (what RPM uses)
-          echo ""
-          echo "Testing detached signature creation (RPM-style)..."
-          echo "test data" > /tmp/test.txt
-          if /tmp/gpg-sign-wrapper.sh --detach-sign -u "${{ secrets.GPG_KEY_ID }}" --armor /tmp/test.txt 2>&1; then
-            echo "✓ Detached signature created successfully"
-            ls -la /tmp/test.txt.asc
-            # Verify the signature
-            if gpg --verify /tmp/test.txt.asc /tmp/test.txt 2>&1; then
-              echo "✓ Signature verification successful"
-            else
-              echo "::error::Signature verification FAILED"
-            fi
-          else
-            echo "::error::Failed to create detached signature"
-          fi
-
-          # Configure GPG to use SHA256 for digests
-          cat > ~/.gnupg/gpg.conf << 'GPG_CONF'
-          personal-digest-preferences SHA256
-          cert-digest-algo SHA256
-          default-preference-list SHA512 SHA384 SHA256 SHA224 AES256 AES192 AES CAST5 ZLIB BZIP2 ZIP Uncompressed
+          echo "::endgroup::"ST5 ZLIB BZIP2 ZIP Uncompressed
           GPG_CONF
 
           # Configure RPM to use wrapper script with SHA256
@@ -921,125 +824,109 @@ jobs:
         run: |
           VER="${{ needs.resolve-versions.outputs.maccel_version }}"
           KERNEL_TYPES="${{ inputs.kernel_types }}"
-          REPO="${{ github.repository }}"
+          RELEASE_TYPE="${{ inputs.release_type }}"
 
           {
             echo "notes<<EOF"
-            echo "RPM packages for maccel **$VER**"
+            echo "## ⚠️ Package Signing & Distribution"
             echo ""
-            echo "**Kernel Types:** $KERNEL_TYPES"
+            echo "The RPM packages in this repository are **unsigned**. For signed, verified packages with automatic updates, use the central RPM repository:"
             echo ""
-            echo "> **Note:** The kmod packages are built for"
-            echo "> specific kernel versions. Install the package"
-            echo "> matching your kernel type (main for Aurora,"
-            echo "> bazzite for Bazzite)."
+            echo "### Install from Central Repository (Recommended)"
             echo ""
-            echo "## Installation"
             echo "\`\`\`bash"
-            echo "sudo wget \\"
-            echo "  https://raw.githubusercontent.com/$REPO/main/maccel.repo \\"
-            echo "  -O /etc/yum.repos.d/maccel.repo && \\"
-            echo "  sudo dnf install maccel"
+            echo "# Add the central repository (stable channel)"
+            echo "sudo curl -o /etc/yum.repos.d/stable.repo \\"
+            echo "  https://abirkel.github.io/rpm-repo/repo/stable.repo"
+            echo ""
+            echo "# Install"
+            echo "sudo dnf install maccel"
             echo "\`\`\`"
             echo ""
-            echo "**Post-install:** \`sudo usermod -aG maccel \$USER\`"
+            echo "The GPG key is automatically imported from the repository configuration."
+            echo ""
+            echo "### Install from This Repository (Unsigned)"
+            echo ""
+            echo "If you prefer to install directly from this repository:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "# Download and install RPM manually"
+            echo "sudo dnf install <rpm-url-from-release>"
+            echo "\`\`\`"
+            echo ""
+            echo "---"
+            echo ""
+            echo "## Release Information"
+            echo ""
+            echo "**Maccel Version:** \`${VER}\`"
+            echo "**Kernel Types:** $KERNEL_TYPES"
+            echo "**Release Type:** $RELEASE_TYPE"
+            echo ""
+            echo "> **Note:** The kmod packages are built for specific kernel versions. Install the package matching your kernel type (main for Aurora, bazzite for Bazzite)."
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Create or update GitHub release
+      - name: Prepare release title
+        id: release_title
+        run: |
+          set -euo pipefail
+          VER="${{ needs.resolve-versions.outputs.maccel_version }}"
+          RELEASE_TYPE="${{ inputs.release_type }}"
+
+          # Strip 'v' prefix if present
+          VERSION="${VER#v}"
+
+          TITLE="v${VERSION}-${RELEASE_TYPE}"
+          TAG="v${VERSION}-${RELEASE_TYPE}"
+
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Release title: $TITLE"
+
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ needs.resolve-versions.outputs.maccel_version }}
+          tag_name: ${{ steps.release_title.outputs.tag }}
+          name: ${{ steps.release_title.outputs.title }}
           files: artifacts/*.rpm
           body: ${{ steps.release_notes.outputs.notes }}
           fail_on_unmatched_files: false
-          # This will update existing release if it exists
 
-      - name: Prepare merged repository
+
+  publish-to-repo-main:
+    needs: [build-rpm, resolve-versions, load-config]
+    if: contains(inputs.kernel_types, 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger rpm-repo signing and publishing
         run: |
-          set -euo pipefail
-          echo "::group::Preparing merged repository"
+          gh workflow run sign-and-publish.yml \
+            --repo abirkel/rpm-repo \
+            -f builder_repo=${{ github.repository }} \
+            -f run_id=${{ github.run_id }} \
+            -f artifact_name=rpm-packages-main \
+            -f distro=fedora \
+            -f release=${{ needs.load-config.outputs.container_version }} \
+            -f arch=x86_64 \
+            -f build_type=${{ inputs.release_type }}
+        env:
+          GH_TOKEN: ${{ secrets.RPM_REPO_DISPATCH_TOKEN }}
 
-          # Install git for gh-pages action
-          dnf install -y git
-
-          # Clone existing gh-pages branch to get current packages
-          echo "Cloning existing gh-pages branch..."
-          git clone --depth=1 --branch=gh-pages \
-            https://github.com/${{ github.repository }}.git gh-pages-repo \
-            || mkdir -p gh-pages-repo
-
-          # Determine Fedora version and architecture
-          FEDORA_VERSION="${{ needs.load-config.outputs.container_version }}"
-          ARCH="x86_64"
-
-          # Create Fedora-standard repository structure
-          # repo/fedora/VERSION/ARCH/ for binary RPMs
-          # repo/fedora/VERSION/source/ for source RPMs
-          REPO_BASE="repo/fedora/${FEDORA_VERSION}"
-          mkdir -p "${REPO_BASE}/${ARCH}"
-          mkdir -p "${REPO_BASE}/source"
-
-          # Copy existing packages from gh-pages (preserving structure)
-          if [ -d "gh-pages-repo/fedora" ]; then
-            echo "Copying existing packages from gh-pages..."
-            cp -r gh-pages-repo/fedora/* repo/fedora/ 2>/dev/null || true
-          fi
-
-          # Sort new packages into proper directories
-          echo "Organizing new packages..."
-          for rpm in artifacts/*.rpm; do
-            if [ -f "$rpm" ]; then
-              if [[ "$rpm" == *.src.rpm ]]; then
-                # Source RPMs go to source/
-                cp "$rpm" "${REPO_BASE}/source/"
-                echo "  → $(basename "$rpm") → source/"
-              else
-                # Binary RPMs go to arch directory
-                cp "$rpm" "${REPO_BASE}/${ARCH}/"
-                echo "  → $(basename "$rpm") → ${ARCH}/"
-              fi
-            fi
-          done
-
-          # Verify we have packages
-          if ! ls "${REPO_BASE}/${ARCH}"/*.rpm 1>/dev/null 2>&1 && \
-             ! ls "${REPO_BASE}/source"/*.rpm 1>/dev/null 2>&1; then
-            echo "::endgroup::"
-            echo "::error::No packages found after organization"
-            exit 1
-          fi
-
-          # List organized packages
-          echo ""
-          echo "Repository structure:"
-          echo "Binary packages (${ARCH}):"
-          ls -lh "${REPO_BASE}/${ARCH}"/*.rpm 2>/dev/null || echo "  (none)"
-          echo ""
-          echo "Source packages:"
-          ls -lh "${REPO_BASE}/source"/*.rpm 2>/dev/null || echo "  (none)"
-
-          # Generate repository metadata for binary packages
-          echo ""
-          echo "Generating repository metadata for ${ARCH}..."
-          createrepo_c "${REPO_BASE}/${ARCH}/"
-
-          # Generate repository metadata for source packages
-          echo "Generating repository metadata for source..."
-          createrepo_c "${REPO_BASE}/source/"
-
-          # Generate top-level metadata
-          echo "Generating top-level repository metadata..."
-          createrepo_c repo/
-
-          echo "✓ Repository preparation complete"
-          echo "::endgroup::"
-
-      - name: Deploy repository to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: repo
-          keep_files: false
-          # keep_files: false ensures clean deployment
-          # All packages are in repo/ so nothing is lost
+  publish-to-repo-bazzite:
+    needs: [build-rpm, resolve-versions, load-config]
+    if: contains(inputs.kernel_types, 'bazzite')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger rpm-repo signing and publishing
+        run: |
+          gh workflow run sign-and-publish.yml \
+            --repo abirkel/rpm-repo \
+            -f builder_repo=${{ github.repository }} \
+            -f run_id=${{ github.run_id }} \
+            -f artifact_name=rpm-packages-bazzite \
+            -f distro=fedora \
+            -f release=${{ needs.load-config.outputs.container_version }} \
+            -f arch=x86_64 \
+            -f build_type=${{ inputs.release_type }}
+        env:
+          GH_TOKEN: ${{ secrets.RPM_REPO_DISPATCH_TOKEN }}
